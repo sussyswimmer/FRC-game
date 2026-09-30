@@ -99,12 +99,13 @@ class Viewer:
                 pg.draw.rect(surf, (200, 180, 40), r, 1)
             for pair in FIELD.trench_columns:
                 pg.draw.rect(surf, (30, 30, 34), self.rect(pair[a]))
-            tower = self.rect(FIELD.towers[a])
-            pg.draw.rect(surf, (35, 35, 40), tower)
-            for k in range(3):
-                y = tower.top + (k + 1) * tower.height // 4
-                pg.draw.line(surf, col, (tower.left + 3, y), (tower.right - 3, y), 3)
-            pg.draw.rect(surf, col, tower, 2)
+            # the TOWER: its floor plate, the RUNGS' line and the two UPRIGHTS
+            pg.draw.rect(surf, (45, 45, 50), self.rect(FIELD.towers[a]))
+            front = FIELD.tower_fronts[a]
+            cx = front.center[0]
+            pg.draw.line(surf, col, self.px(cx, front.y0), self.px(cx, front.y1), 4)
+            for pair in FIELD.tower_uprights:
+                pg.draw.rect(surf, col, self.rect(pair[a]))
             pg.draw.rect(surf, col, self.rect(FIELD.depots[a]), 2)
             oy = C.OUTPOST_CENTER_Y_BLUE if a == Alliance.BLUE else C.FIELD_WIDTH - C.OUTPOST_CENTER_Y_BLUE
             ox = 0.0 if a == Alliance.BLUE else C.FIELD_LENGTH

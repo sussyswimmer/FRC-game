@@ -37,10 +37,11 @@ def _fire_all(m: Match, cmd: RobotCommand, until: float = 16.0) -> None:
 
 
 def test_hexagonal_opening():
-    assert in_opening(0.0, 0.0) and in_opening(APOTHEM - 0.01, 0.0)
-    assert not in_opening(APOTHEM + 0.01, 0.0)
-    assert in_opening(0.0, APOTHEM + 0.05)  # a corner points along y: more room that way
-    assert not in_opening(0.0, APOTHEM / math.cos(math.pi / 6) + 0.01)
+    # official drawings: the flats face the guardrails (y), the corners point at the alliance walls (x)
+    assert in_opening(0.0, 0.0) and in_opening(0.0, APOTHEM - 0.01)
+    assert not in_opening(0.0, APOTHEM + 0.01)
+    assert in_opening(APOTHEM + 0.05, 0.0)  # a corner points along x: more room that way
+    assert not in_opening(APOTHEM / math.cos(math.pi / 6) + 0.01, 0.0)
 
 
 def test_drag_shortens_the_flight():

@@ -50,9 +50,9 @@ For anything about **models and training**, your role is **mentor and reviewer, 
 
 ## Conventions
 
-- After changing anything in `src/rebuilt_sim/`, run `.venv\Scripts\python.exe -m pytest -q` (85 tests).
+- After changing anything in `src/rebuilt_sim/`, run `.venv\Scripts\python.exe -m pytest -q` (94 tests).
 - The strategy physics is the default and is calibrated. High-fidelity changes (`HiFiConfig`, `drivetrain.py`, `collision.py`, `sensors.py`, `ballistics.py`) must leave it unchanged.
 - If bot behavior or robot tiers change, re-run `scripts/calibrate.py` (and `--hifi`) and update the numbers in `docs/02-simulator.md` and `docs/03-driving-and-aiming.md`.
-- Coordinates use WPILib's blue-origin field frame, in meters. The geometry comes from the official 2026 AprilTag layout.
+- Coordinates use WPILib's blue-origin field frame, in meters. The geometry comes from the official 2026 Field Dimension Drawings and matches the official AprilTag layout.
 - `runs/` (training output), `datasets/` (generated vision data) and `.venv/` are gitignored. Never commit model checkpoints or datasets unless the user decides to.
 - The vision code (`src/rebuilt_sim/vision/`, docs/04-vision.md) only reads match state; it must never change the simulation. Choosing export classes, box style and filters is a training decision: leave it to the user.

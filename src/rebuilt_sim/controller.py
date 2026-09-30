@@ -77,14 +77,19 @@ def _segment_hits_box(x0: float, y0: float, x1: float, y1: float,
 def _around_tower(r: Robot, gx: float, gy: float) -> tuple[float, float] | None:
     """Waypoint around a TOWER that sits between the robot and its goal (e.g. DEPOT <-> OUTPOST).
 
-    Only triggers when the robot would actually run into the TOWER, so goals right against its
-    face (the climbing positions) are still reached directly.
+    Only triggers when the robot would actually run into the TOWER's front (its UPRIGHTS and
+    RUNGS), so goals right against it (the climbing positions) are still reached directly, and a
+    robot hugging the alliance wall passes behind the UPRIGHTS.
     """
     rad = r.spec.radius
     m = rad - 0.05
+    too_tall = FIELD.clearance(r.spec) >= 3  # can't pass under the supports behind the UPRIGHTS
     for a in Alliance:
-        t = FIELD.towers[a]
-        if not _segment_hits_box(r.x, r.y, gx, gy, t.x0 - m, t.x1 + m, t.y0 - m, t.y1 + m):
+        t = (FIELD.towers if too_tall else FIELD.tower_fronts)[a]
+        box = (t.x0 - m, t.x1 + m, t.y0 - m, t.y1 + m)
+        if box[0] <= gx <= box[1] and box[2] <= gy <= box[3]:
+            continue  # the goal is at the TOWER itself: no way around leads there
+        if not _segment_hits_box(r.x, r.y, gx, gy, *box):
             continue
         front = t.x1 + rad + 0.25 if a == Alliance.BLUE else t.x0 - rad - 0.25
         below, above = t.y0 - rad - 0.25, t.y1 + rad + 0.25
@@ -184,6 +189,18 @@ def _in_trench(x, y, margin: float = 0.1):
 
 
 _GTRENCH = _in_trench(_GX, _GY, margin=0.0)
+
+
+def _in_tower(x, y):
+    """Mask of points inside a TOWER's footprint: FUEL rolls in under the RUNGS, but the UPRIGHTS
+    are closer together than a robot is wide, so the bots leave it there."""
+    inside = np.zeros(np.shape(x), dtype=bool)
+    for b in FIELD.towers:
+        inside |= (x > b.x0) & (x < b.x1) & (y > b.y0) & (y < b.y1)
+    return inside
+
+
+_GTOWER = _in_tower(_GX, _GY)
 
 
 @dataclass
@@ -332,7 +349,7 @@ class MacroController:
         if r.y + ext_y > C.FIELD_WIDTH:
             touching.append((0.0, -1.0))
         reach = r.reach + 0.03
-        for x0, x1, y0, y1 in self.match._robot_boxes[not r.spec.can_trench]:
+        for x0, x1, y0, y1 in self.match._boxes_of[r.index]:
             if r.x + ext_x <= x0 or r.x - ext_x >= x1 or r.y + ext_y <= y0 or r.y - ext_y >= y1:
                 continue
             hit = box_contact(aabb_box(x0, x1, y0, y1), box)
@@ -412,6 +429,7 @@ class MacroController:
                 d = np.where(ok, d, np.inf)
             if not r.spec.can_trench:  # can't reach FUEL under a TRENCH arm
                 d = np.where(_in_trench(ground[:, 0], ground[:, 1]), np.inf, d)
+            d = np.where(_in_tower(ground[:, 0], ground[:, 1]), np.inf, d)
             if mem.avoid is not None and t < mem.avoid[2]:
                 d = np.where(np.hypot(ground[:, 0] - mem.avoid[0], ground[:, 1] - mem.avoid[1]) < 0.6, np.inf, d)
             k = int(np.argmin(d))
@@ -436,6 +454,7 @@ class MacroController:
         score[(reg == 1) | (reg == 3)] *= 0.3  # FUEL stuck against the HUB line is awkward to reach
         if not r.spec.can_trench:
             score[_GTRENCH] = 0.0
+        score[_GTOWER] = 0.0
         mem = self.mem[r.index]
         if mem.avoid is not None and self.match.t < mem.avoid[2]:
             score[np.hypot(X - mem.avoid[0], Y - mem.avoid[1]) < 1.0] = 0.0
@@ -461,7 +480,14 @@ class MacroController:
         mem.sweep_phase += self.match.cfg.dt
         sweep = 0.3 * math.sin(mem.sweep_phase * 2.0)
         gx = (box.x1 if r.alliance == Alliance.BLUE else box.x0) + sign * (r.spec.radius - 0.1)
-        if r.rect:  # a flat bumper pins FUEL against the wall: bring the intake right up to it
+        # FUEL the intake can reach from there: in the DEPOT, no deeper than this x
+        deepest = gx - sign * (r.front + r.spec.intake_reach + C.FUEL_RADIUS)
+        g = self.match.ground_fuel()
+        reachable = ((g[:, 0] >= box.x0) & (g[:, 0] <= box.x1) & (g[:, 1] >= box.y0) & (g[:, 1] <= box.y1)
+                     & (sign * (g[:, 0] - deepest) >= 0.0))
+        # A flat bumper pins FUEL against the wall, and FUEL pushed back against it is out of reach:
+        # then bring the intake right up to the wall.
+        if r.rect or not reachable.any():
             gx = (0.0 if r.alliance == Alliance.BLUE else C.FIELD_LENGTH) + sign * (r.front + 0.06)
         vx, vy, om, _ = self._drive(r, gx, cy + sweep, heading=wall_heading, arrive=0.05)
         return RobotCommand(vx, vy, om, intake=True)

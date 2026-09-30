@@ -2,7 +2,7 @@
 
 A match simulator and reinforcement-learning environments for the 2026 FRC game *REBUILT presented by Haas*.
 
-- **Field:** built from the official AprilTag layout.
+- **Field:** built from the official 2026 Field Dimension Drawings, and checked against the official AprilTag layout.
 - **Rules:** follow the game manual (TU22).
 - **Calibration:** robot skill levels are tuned against the real 2026 İstanbul Regional Day 1 matches.
 - **Two physics modes:**
@@ -35,7 +35,7 @@ Run the commands below from this folder with `.venv\Scripts\python.exe`, or acti
 python -m pytest -q
 ```
 
-85 tests:
+94 tests:
 
 - the rules, the field geometry, the physics invariants and navigation;
 - the Gymnasium/PettingZoo API checkers;
@@ -168,7 +168,7 @@ from rebuilt_sim.pz_env import RebuiltParallelEnv  # PettingZoo, several learnin
 
 | Path | What it holds |
 |---|---|
-| `src/rebuilt_sim/constants.py` | Field geometry (from the AprilTag layout), match timing, point values, RP thresholds |
+| `src/rebuilt_sim/constants.py` | Field geometry (from the official drawings), match timing, point values, RP thresholds |
 | `src/rebuilt_sim/rules.py` | Clock, HUB shift schedule, 3 s grace windows, scoring, ranking points, fouls |
 | `src/rebuilt_sim/field.py` | Obstacles, zones, BUMPs, TRENCHes, TOWERs, DEPOTs, OUTPOSTs |
 | `src/rebuilt_sim/robot.py` | Robot capabilities and the calibrated skill tiers (elite, strong, mid, low, climber, broken) |

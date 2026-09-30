@@ -11,7 +11,7 @@ Step 3 adds a **high-fidelity physics mode** for that. It runs the same match, r
 | Commands | Act immediately | **Latency**: the motors act on the command from 40 ms ago |
 | Bumpers | Circles | **Rectangles** that turn when hit off-center |
 | What a robot knows | The truth | A **pose estimate**: odometry, a drifting gyro, AprilTag vision fixes |
-| Shooting | Hit probability by distance and speed | **3D FUEL flight** with drag, into the 41.7 in hexagonal HUB opening 72 in up |
+| Shooting | Hit probability by distance and speed | **3D FUEL flight** with drag, into the 41.73 in hexagonal HUB opening 72 in up |
 | Aiming | Automatic | The robot's **aim software** (a shot table and shoot-on-the-move lead), or **your agent sets exit speed, hood and turret** |
 
 The rules engine and the 34 original tests are unchanged, and the default is still the strategy physics. Turn step 3 on with one flag.
@@ -132,7 +132,7 @@ Robots are their **bumper rectangles**: a 27.5 in frame plus 3.25 in bumpers, tu
   - two robots meeting bumper-to-bumper push through the middle of the overlap;
   - a corner hit pushes at the corner and **spins** the robot that was hit.
 - **Each contact gets an impulse** that stops the bodies moving into each other, with a little bounce and bumper friction. Leftover overlap is pushed apart by mass.
-- **Field walls and elements** (HUBs, TRENCH columns, TOWERs, and TRENCH openings for tall robots) are fixed rectangles.
+- **Field walls and elements** are fixed rectangles: the HUBs, TRENCH columns and TOWER uprights for every robot, and the TRENCH openings and the TOWER's rungs and supports for robots too tall to pass under them (the clearance classes in [02-simulator.md](02-simulator.md) §4).
 - **Zone rules use the real footprint.** G407 (bumpers in the zone), G403 (fully across the CENTER LINE), the TOWER and OUTPOST checks all use a rotated rectangle's extent. A robot turned 45° reaches further.
 - **FUEL** is bulldozed out through the nearest side of the rectangle, and the intake sits at the front bumper.
 
@@ -189,7 +189,7 @@ In high fidelity a robot's software (and the learner's observation) uses **what 
 
 **Scoring and bounces:**
 
-- It **scores** by dropping through the **hexagonal opening at the top of the HUB** (41.7 in across the flats, 72 in up). A ball clipping the rim counts as in when its center is inside the rim by at least half a radius.
+- It **scores** by dropping through the **hexagonal opening at the top of the HUB** (41.73 in across the flats inside, 72 in up; drawing GE-26300). Its flats face the guardrails and its corners point at the alliance walls, so a shot from straight in front has 48.2 in of opening (corner to corner) along its line of flight, and one from 30° to the side 41.7 in. A ball clipping the rim counts as in when its center is inside the rim by at least half a radius.
 - It **bounces** off the HUB's top rim outside the opening, off the HUB's sides, off the field walls, and on the carpet, then rolls.
 - It **can drop into the other alliance's HUB**, which scores for that alliance.
 
@@ -228,13 +228,14 @@ In high fidelity a robot's software (and the learner's observation) uses **what 
 
 | Tier | Distance: hit rate, high fidelity (step 2 hit probability) |
 |---|---|
-| elite | 2.6 m: 93% (90%) · 3.2 m: 92% (90%) · 4.2 m: 76% (85%) · 6.5 m: 71% (74%) |
-| strong | 1.8 m: 72% (65%) · 2.4 m: 65% (65%) · 3.4 m: 53% (55%) · 4.5 m: 34% (44%) |
-| mid | 1.4 m: 47% (50%) · 2.0 m: 52% (50%) · 3.0 m: 35% (36%) · 3.5 m: 30% (29%) |
-| low | 1.6 m: 33% (35%) · 2.6 m: 30% (17%) · 2.8 m: 25% (13%) |
+| elite | 2.6 m: 92% (90%) · 3.2 m: 92% (90%) · 4.2 m: 88% (85%) · 6.5 m: 82% (74%) |
+| strong | 1.8 m: 72% (65%) · 2.4 m: 64% (65%) · 3.4 m: 54% (55%) · 4.5 m: 42% (44%) |
+| mid | 1.4 m: 45% (50%) · 2.0 m: 53% (50%) · 3.0 m: 36% (36%) · 3.5 m: 31% (29%) |
+| low | 1.6 m: 35% (35%) · 2.6 m: 30% (17%) · 2.8 m: 26% (13%) |
 
 - Only the sweet-range value was tuned.
 - Beyond it, the elite, strong and mid tiers fall off at a similar rate to step 2's hand-tuned rule, within about 10 points.
+- The table was re-measured after the geometry fix turned the HUB's hexagon 30° (corners toward the alliance walls, as in the drawings). The sweet-range rates stayed on target, so the spreads were kept. Long shots gained the most, because a shot from in front now has the opening's corner-to-corner length along its flight: elite at 4.2 m went from 76% to 88%, strong at 4.5 m from 34% to 42%.
 - The low tier's fixed hood keeps it flatter.
 
 **Manual aiming** (`RobotCommand.shot_speed/hood/turret`, the `continuous_aim` action mode): the shooter goes where it is told, and every shot fires as commanded. There is no interlock, so the agent has to learn to:
@@ -277,20 +278,26 @@ Rewards are unchanged (`RewardConfig`).
 
 | | Strategy physics | High fidelity | Real Day 1 |
 |---|---|---|---|
-| FUEL per robot: elite / strong / mid / low | 278 / 58 / 23 / 6.7 | 227 / 45 / 17 / 7.3 | ~225–250 / 40–70 / 15–30 / <15 |
-| Share of shots that go in: elite / strong / mid / low | 86% / 63% / 46% / 30% | 85% / 62% / 47% / 44% | – |
-| Elite + strong + strong alliance, FUEL | 398 | about 316 (24 matches) | 393, 394, 409 |
-| Alliance FUEL: median / mean / max | 54 / 77 / 385 | 41 / 63 / 323 | 34 / 87 / 409 |
-| Alliances at 100+ FUEL | 16% | 12% | 24% |
-| AUTO share of FUEL | 20.8% | 24.1% | 19.8% |
-| Foul awards per alliance | 0.27 | 0.26 | 0.26 |
-| TOWER points per alliance | 0.42 | 0.42 | 0.48 |
-| Median winning margin | 40 | 29 | 42 |
+| FUEL per robot: elite / strong / mid / low | 279 / 58 / 25 / 6.8 | 235 / 43 / 17 / 7.5 | ~225–250 / 40–70 / 15–30 / <15 |
+| Share of shots that go in: elite / strong / mid / low | 85% / 62% / 47% / 30% | 86% / 63% / 48% / 44% | – |
+| Elite + strong + strong alliance, FUEL | 403 | about 313 (24 matches) | 393, 394, 409 |
+| Alliance FUEL: median / mean / max | 55 / 79 / 392 | 38 / 63 / 343 | 34 / 87 / 409 |
+| Alliances at 100+ FUEL | 17% | 11% | 24% |
+| AUTO share of FUEL | 20.6% | 24.4% | 19.8% |
+| Foul awards per alliance | 0.28 | 0.26 | 0.26 |
+| TOWER points per alliance | 0.47 | 0.26 | 0.48 |
+| Median winning margin | 32 | 31 | 42 |
+
+These are the numbers after the geometry fix (HANDOFF.md §11). TOWER points rest on about a dozen
+climber robots with a 50% success chance, so they move by about ±0.2 between runs: the two modes
+started the same number of climbs here. The median winning margin is a few points lower than before
+the fix (32 and 28 on two sets of seeds, against 40 and 33 before): mid robots now collect from the
+DEPOT reliably, which evens out the Day 1 mix's matches a little.
 
 **What the table shows:**
 
 - **Accuracy carries over:** the elite, strong and mid tiers hit the same share of shots in both physics modes. The low tier hits more (44% vs 30%): its shots are mostly the preload from close range, and its hit rate falls off less steeply with distance than step 2's linear rule assumes (see the table in §6).
-- **Robots score about 20% less FUEL, from slower cycles:**
+- **Robots score about 15–30% less FUEL, from slower cycles:**
   - Alone on an empty field, a robot collects almost as fast as before: in 20 s the elite collects 8% less and the strong robot 4% less.
   - In full matches, robots carry more FUEL on average (62 across the field vs 54). Unloading takes longer: non-turret robots must line up within a few degrees instead of ±15°, the flywheel spins up, the high-arc shots fly about 1 s, and every command is 40 ms late.
   - A strong robot drives about 20% less distance per match.
@@ -318,7 +325,6 @@ On the 4-core cloud container used to build this:
 
 | Assumption | Where | Why it matters |
 |---|---|---|
-| HUB opening: 41.7 in **across the flats**, with flats facing the alliance walls | `constants.HUB_OPENING_ACROSS`, `ballistics._HEX` | If 41.7 in is across the corners, the target is about 14% narrower and every tier's spread would need re-tuning |
 | FUEL mass 0.227 kg and drag coefficient 0.5 | `constants.FUEL_MASS`, `FUEL_DRAG_COEF` | Shot tables and ranges |
 | Spin (Magnus lift) is not modeled | `ballistics.flight_step` | Backspin makes real shots float farther |
 | Bumper depth 3.25 in, module inset 0.065 m, 60 kg robots | `constants.py`, `robot.py` | Footprints, turning inertia |

@@ -140,7 +140,7 @@ class Collider:
             ex, ey = half_extents(robot_box(r))
             ex, ey = ex + 0.2, ey + 0.2
             walls = r.x < ex or r.x > C.FIELD_LENGTH - ex or r.y < ey or r.y > C.FIELD_WIDTH - ey
-            boxes = [b for b in m._robot_boxes[not r.spec.can_trench]
+            boxes = [b for b in m._boxes_of[r.index]
                      if r.x + ex > b[0] and r.x - ex < b[1] and r.y + ey > b[2] and r.y - ey < b[3]]
             if walls or boxes:
                 statics.append((r, walls, boxes))

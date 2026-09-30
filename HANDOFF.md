@@ -1,6 +1,6 @@
 # HANDOFF: FRC 2026 REBUILT simulator and ML training project
 
-*Written 2026-09-29 at the end of the first Claude Code chat, updated 2026-09-30 after the second (step 3) and the third (step 4). For the next Claude Code chat, and for the user.*
+*Written 2026-09-29 at the end of the first Claude Code chat, updated 2026-09-30 after the second (step 3), the third (step 4) and the simulator geometry fix. For the next Claude Code chat, and for the user.*
 
 ---
 
@@ -51,6 +51,7 @@ This is the most important instruction in the project.
 | **Model training** (the user leads; curriculum in §4) | ⏳ Not started | No models have been trained. `runs/` is empty. |
 | **3. Driving/aiming fidelity:** a high-fidelity physics mode (swerve modules, latency, pose estimation, rectangular bumpers, 3D FUEL ballistics) | ✅ Done (chat 2) | `docs/03-driving-and-aiming.md`, `HiFiConfig` in `sim.py`, `drivetrain.py`, `collision.py`, `sensors.py`, `ballistics.py`, 3 new Gymnasium ids, `--hifi` on the scripts, 62 tests |
 | **4. Vision track:** 3D rendering of matches and labeled synthetic images | ✅ Done (chat 3) | `docs/04-vision.md`, `src/rebuilt_sim/vision/`, `scripts/make_dataset.py`, `export_dataset.py`, `check_dataset.py`, `render_view.py`, 85 tests |
+| **Geometry fix:** the simulator aligned with the official field drawings (TOWER, OUTPOST, DEPOT, climb positions, HUB hexagon, open-frame TOWER) | ✅ Done (after step 4) | `constants.py`, `field.py`, `controller.py`, `ballistics.py`, recalibrated docs 02/03, 94 tests (§11) |
 | **Vision model training** (the user leads; outline in §4b) | ⏳ Not started | No datasets generated yet; `datasets/` is gitignored |
 
 **Scope the user chose after step 1:**
@@ -64,7 +65,7 @@ This is the most important instruction in the project.
 
 ## 2. Open questions: ask the user these at the start of the next chat
 
-1. **What next?** Steps 1–4 are built. Start the RL curriculum (§4), the vision curriculum (§4b), or fix the simulator geometry first (question 6)? Have them try `python scripts/play.py --hifi` and `python scripts/render_view.py`, and look at `docs/03-driving-and-aiming.md` and `docs/04-vision.md`.
+1. **What next?** Steps 1–4 are built and the simulator matches the official drawings. Start the RL curriculum (§4) or the vision curriculum (§4b)? Have them try `python scripts/play.py --hifi` and `python scripts/render_view.py`, and look at `docs/03-driving-and-aiming.md` and `docs/04-vision.md`.
 2. **Background:** how comfortable are they with Python, NumPy, PyTorch, general ML, and reinforcement learning? Adapt depth and pace to the answer.
 3. **Learning path for the training loop:**
    - **(A)** Write PPO from scratch, single-file CleanRL style. This is the most learning; they can then compare against Stable-Baselines3.
@@ -72,7 +73,6 @@ This is the most important instruction in the project.
    - **(C)** Dissect the existing reference scripts.
 4. **Experiment tracking:** TensorBoard (already installed, local), or Weights & Biases (the industry-standard web dashboard; needs a free account)?
 5. **Vision data choices** (only when they start vision training): which classes, visible or whole-object boxes, filters, flips (they corrupt AprilTags), dataset size, and whether to hand-label a small real test set. `docs/04-vision.md` §9 lists the trade-offs; the decisions are theirs.
-6. **Simulator vs the official field drawings.** Chat 3 got the official 2026 Field Dimension Drawings. They show the simulator's TOWER and OUTPOST 0.22 m off, the DEPOT 1.07 m off, climb positions beyond the rung ends, the HUB hexagon rotated 30°, and the TOWER as an open frame, not a box (`docs/04-vision.md` §4). The 3D render already follows the drawings; the simulator was left unchanged. Options: (A) fix the simulator in its own small step, then re-run the tests and `calibrate.py` (and `--hifi`) and update docs 02/03 (recommended); (B) keep it; (C) render the simulator's geometry.
 
 ---
 
@@ -82,7 +82,7 @@ This is the most important instruction in the project.
 git clone https://github.com/sussyswimmer/FRC-game.git
 cd FRC-game
 uv sync --all-extras                      # creates .venv (Python 3.11, CPU PyTorch, SB3, Gymnasium, PettingZoo, pygame-ce)
-.venv\Scripts\python.exe -m pytest -q     # expect: 85 passed
+.venv\Scripts\python.exe -m pytest -q     # expect: 94 passed
 .venv\Scripts\python.exe scripts\play.py  # drive a robot yourself (WASD, Q/E, SPACE intake, F shoot, C climb)
 ```
 
@@ -184,7 +184,6 @@ Step 4 generates the data (`docs/04-vision.md`). Training a detector follows the
 
 **Step 4: vision** is ✅ done (chat 3). See `docs/04-vision.md`. Follow-ups it left, if wanted (§13 there):
 
-- **Align the simulator with the official drawings** (question 6 in §2): TOWER, OUTPOST and DEPOT positions, climb positions, the HUB hexagon's rotation, the TOWER as an open frame.
 - Tinted, reflective polycarbonate ("glass"); more shadows; FUEL logos; people and carts outside the field; the AndyMark tag layout.
 - A 2-3x faster renderer by batching small shapes, if generation time ever matters.
 
@@ -196,11 +195,11 @@ Step 4 generates the data (`docs/04-vision.md`). Training a detector follows the
 
 ---
 
-## 6. Assumptions to verify (from the official 2026 Field Dimension Drawings)
+## 6. Assumptions to verify (estimates the official drawings and manual do not settle)
 
 | Assumption | Where it lives | Why it matters |
 |---|---|---|
-| **Resolved by the drawings (chat 3), not yet applied to the simulator** (question 6 in §2): the DEPOT is at blue y = 5.965 m, not 7.03; the TOWER and OUTPOST centers are 0.22 m lower in y; the rungs span only ±0.60 m, so the climb offsets of ±0.95 m are off the rungs; the HUB opening is 41.7 in across the flats *inside*, but its corners (not flats) face the alliance walls | `constants.py`, `field.py`, `ballistics.py` | FUEL routes, climbing, high-fidelity scoring |
+| Three robots can climb side by side (0 and ±0.95 m from the TOWER's center); the manual only implies two | `field.CLIMB_SLOT_OFFSETS` | TRAVERSAL with three climbers |
 | OUTPOST feed-zone size and human-player feed rate (4 FUEL/s) | `constants.py`, `sim.py` | OUTPOST strategy |
 | HUB processing time (0.4–0.9 s) and exit speed (1.2–3.2 m/s) | `constants.py` | Grace-window scoring, FUEL recirculation |
 | Official manual version used: TU22 (final) | `docs/01-video-analysis.md` | All point values and timings |
@@ -219,7 +218,7 @@ Step 4 generates the data (`docs/04-vision.md`). Training a detector follows the
 | `docs/01-video-analysis.md` | Step 1: how the game works and what the real matches showed |
 | `docs/02-simulator.md` | Step 2: simulator design, what is modeled, calibration results, observation/action/reward spec, training recipes |
 | `data/` | Match results and score timelines extracted from the broadcast |
-| `src/rebuilt_sim/constants.py`, `rules.py`, `field.py` | Game rules and field geometry (official manual + AprilTag layout) |
+| `src/rebuilt_sim/constants.py`, `rules.py`, `field.py` | Game rules and field geometry (official manual and field drawings, checked against the AprilTag layout) |
 | `src/rebuilt_sim/robot.py`, `sim.py` | Robot capabilities, skill tiers, and the physics/referee |
 | `src/rebuilt_sim/controller.py`, `bots.py` | Macro actions → driving (navigation), and the scripted drivers |
 | `src/rebuilt_sim/obs.py`, `env.py`, `pz_env.py` | What the agent observes; the Gymnasium and PettingZoo environments |
@@ -231,7 +230,7 @@ Step 4 generates the data (`docs/04-vision.md`). Training a detector follows the
 | `scripts/play.py`, `watch.py`, `calibrate.py`, `evaluate.py` | Tools |
 | `scripts/render_view.py`, `make_dataset.py`, `check_dataset.py`, `export_dataset.py` | Vision tools |
 | `scripts/train_ppo.py`, `train_selfplay.py` | **Reference only.** See the rule at the top |
-| `tests/` | 85 tests: rules, field, physics, navigation, environment APIs, step 3's drivetrain, ballistics and sensors, and step 4's rendering, labels and datasets |
+| `tests/` | 94 tests: rules, field, physics, navigation, environment APIs, step 3's drivetrain, ballistics and sensors, and step 4's rendering, labels and datasets |
 
 ---
 
@@ -299,7 +298,7 @@ Step 4 generates the data (`docs/04-vision.md`). Training a detector follows the
   - exact labels; a dataset generator (parallel, resumable, deterministic, split by match); COCO/YOLO exporters where the user makes the training choices; a checker with contact sheets; a dataset card and manifest.
 - **Checked against independent tools:** the AprilTag C library (the one WPILib and PhotonVision use) reads the rendered tags with the labeled IDs, and its corners agree with the labels to a fraction of a pixel. solvePnP on the labeled corners reproduces the labeled tag poses exactly.
 - **Found on the way:**
-  - the simulator disagrees with the official drawings in a few places (question 6 in §2); left for the user to decide;
+  - the simulator disagreed with the official drawings in a few places; the user chose to fix it, in its own step (§11);
   - random lens distortion can describe impossible lenses, which are now rejected;
   - the AprilTag library reports corners +0.5 px from OpenCV's convention;
   - OpenCV's ArUco returns AprilTag corners rotated 180°.
@@ -307,3 +306,18 @@ Step 4 generates the data (`docs/04-vision.md`). Training a detector follows the
   All of these are documented.
 - **The simulator code was not touched.** The strategy physics was checked bit-for-bit against recordings from before the change.
 - A 3-agent design panel plus a judge reviewed the draft; its correctness and dataset-workflow fixes were applied. The batched-renderer speed-up and the glass effect were left as follow-ups.
+
+## 11. After step 4: the simulator geometry fix
+
+- The user said "fix the simulator geometry" (option A of the old question 6). That is simulator engineering. No training was run.
+- **What changed** (`docs/04-vision.md` §4 has the before/after table):
+  - Positions now come from the official drawings: the TOWER is centered on tag 31 (y 3.746, not 3.962), the OUTPOST on tag 29 (y 0.666, not 0.882), and the DEPOT sits next to the TOWER (y 5.965, not 7.03). The HUB is the drawings' 47 in square, so the ALLIANCE ZONE ends at 4.029 m instead of the tag face at 4.022 m.
+  - **The TOWER is an open frame.** The uprights block everything. The rungs block robots taller than the LOW RUNG's underside (0.665 m), but FUEL rolls under them. The supports back to the wall start 0.721 m up, so shorter robots can drive behind the uprights along the wall. Each robot gets a *clearance class* from its height (`Field.clearance`); every tier is class 0 or 2.
+  - The climbing positions stay at 0 and ±0.95 m, now in front of the uprights: the side robots reach the 5.875 in of rung past each upright (Game Manual 6.5.2 lets climbing robots touch).
+  - **The HUB hexagon** turned 30°: corners toward the alliance walls, flats toward the guardrails (drawing GE-26300).
+  - The 3D render now reads its layout from `constants.py`, so the render and the physics can't disagree again.
+- **Two bot traps the new layout exposed**, fixed in `controller.py` with a regression test each:
+  - FUEL pushed back against the DEPOT's wall was out of the intake's reach, but still counted, so a bot could wait at the DEPOT for the rest of the match (an elite robot scored 55 instead of about 250). Now it drives its intake up to the wall when nothing else is in reach.
+  - FUEL that rolled into the TOWER sent collectors into an endless back-and-forth in front of it (the detour flipped sides each time the robot crossed the TOWER's middle). Now the bots skip FUEL inside a TOWER, and a goal at the TOWER itself gets no detour.
+  - Across all 96 calibration matches, no robot is now stuck for more than 8.6 s (12.1 s before the change).
+- **Recalibrated** (docs 02 §5 and 03 §6 and §8). The shooters' sweet-range hit rates stayed on target with the rotated hexagon, so no spreads changed; long shots got easier. Every tier is still inside its real Day 1 range in both physics modes.

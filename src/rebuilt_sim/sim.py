@@ -141,7 +141,9 @@ class Match:
         self._g420_contacts: set[tuple[int, int]] = set()
         self.hp_budget = [0.0, 0.0]
         self._cell_table = np.full(((_NX + 2) * _PNY, _CELL_CAP), -1, dtype=np.int64)
-        self._robot_boxes = {tall: [tuple(b) for b in self.field.obstacle_arrays[tall]] for tall in (False, True)}
+        self._robot_boxes = {k: [tuple(b) for b in arr] for k, arr in self.field.obstacle_arrays.items()}
+        # the static obstacles each robot can bump into (it passes under the ones it is short enough for)
+        self._boxes_of = [self._robot_boxes[self.field.clearance(r.spec)] for r in self.robots]
         self._init_fuel()
 
         # high fidelity (docs/03-driving-and-aiming.md); all None / off for the strategy physics
@@ -428,7 +430,7 @@ class Match:
                 r.y, r.vy = C.FIELD_WIDTH - rad, min(r.vy, 0.0)
             if not _near_obstacles(r.x, rad):
                 continue
-            for x0, x1, y0, y1 in self._robot_boxes[not r.spec.can_trench]:
+            for x0, x1, y0, y1 in self._boxes_of[r.index]:
                 if r.x + rad <= x0 or r.x - rad >= x1 or r.y + rad <= y0 or r.y - rad >= y1:
                     continue
                 qx, qy = min(max(r.x, x0), x1), min(max(r.y, y0), y1)

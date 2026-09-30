@@ -5,11 +5,9 @@ sheets GE-26000 to GE-26900), the Game Manual (section 5) and the Field Manual, 
 drawings give them. Values marked APPROX were measured off a drawing at scale or estimated from
 renders; colors are all estimates (randomize them). See docs/04-vision.md for the sources.
 
-**The render follows the drawings, not the strategy simulator.** Four simulator constants
-disagree with the drawings (TOWER, OUTPOST and DEPOT positions and the HUB hexagon's rotation;
-see docs/04-vision.md). The simulator is left as it is, so its physics stays calibrated, and the
-3D field here uses the official positions. FUEL and robots are drawn wherever the simulator puts
-them.
+The positions the simulator also uses (HUB, TRENCH, TOWER, OUTPOST, DEPOT, starting line) come
+from ``rebuilt_sim.constants``, so the render and the physics share one layout. The constants
+here are the details only the render needs (heights, the HUB's cap and net, the CHUTE).
 
 Blue elements are built first. Most red elements are the point mirror of blue ones (rotated 180
 degrees about the field center). The TRENCHes are the exception: the fixed TRENCHes are on the
@@ -42,8 +40,8 @@ def srgb(r: float, g: float, b: float) -> tuple[float, float, float]:
 
 
 # ---------------------------------------------------------------------------- layout (inches)
-HUB_X, HUB_Y = 182.11 * IN, 158.84 * IN  # blue HUB center
-HUB_HALF = 23.5 * IN  # 47 in square body
+HUB_X, HUB_Y = C.HUB_CENTER_BLUE  # blue HUB center
+HUB_HALF = C.HUB_HALF  # 47 in square body
 HUB_BODY_TOP = 49.75 * IN
 HUB_CAP_TOP = 59.4 * IN  # APPROX
 HUB_CAP_HALF_TOP = 18.0 * IN  # APPROX: the cap narrows to about 36 in square
@@ -53,27 +51,27 @@ HUB_FUNNEL_APOTHEM_BOTTOM = 28.7 / 2 * IN  # APPROX
 HUB_NET_HALF_WIDTH = 58.41 / 2 * IN
 HUB_NET_TOP = 120.36 * IN
 HUB_NET_REACH = 10.26 * IN  # past the neutral face
-BUMP_HALF_X = 22.2 * IN
+BUMP_HALF_X = C.BUMP_DEPTH / 2
 BUMP_APEX = 6.51 * IN
 BUMP_LIP = 0.61 * IN
 BUMP_Y = ((62.34 * IN, 135.34 * IN), (182.34 * IN, 255.34 * IN))
-TRENCH_OPENING = 50.34 * IN
+TRENCH_OPENING = C.TRENCH_OPENING_WIDTH
 TRENCH_COLUMN = 12.0 * IN
-TRENCH_ARM_BOTTOM = 22.25 * IN
+TRENCH_ARM_BOTTOM = C.TRENCH_CLEARANCE
 TRENCH_ARM_TOP = 26.3 * IN  # APPROX
 TRENCH_COLUMN_TOP_HALF = 7.0 * IN  # APPROX: the column's trapezoid narrows to about 14 in on top
 TAG_PANEL_Z = (29.75 * IN, 40.25 * IN)
-TOWER_Y = 147.47 * IN  # blue TOWER center (tag 31), NOT constants.TOWER_CENTER_Y_BLUE
+TOWER_Y = C.TOWER_CENTER_Y_BLUE  # blue TOWER center (tag 31)
 TOWER_WALL_Y = (122.85 * IN, 172.10 * IN)
 TOWER_WALL_TOP = 78.25 * IN
-TOWER_UPRIGHT_X = (40.0 * IN, 43.51 * IN)
-TOWER_UPRIGHT_GAP = 32.25 * IN  # between the uprights' inner faces
+TOWER_UPRIGHT_X = C.TOWER_UPRIGHT_X
+TOWER_UPRIGHT_GAP = C.TOWER_UPRIGHT_GAP  # between the uprights' inner faces
 TOWER_RUNG_X = 41.75 * IN
-TOWER_RUNG_HALF = 23.5 * IN
-DEPOT_Y = (213.85 * IN, 255.85 * IN)  # NOT constants.DEPOT_CENTER_Y_BLUE
-DEPOT_DEPTH = 27.0 * IN
+TOWER_RUNG_HALF = C.TOWER_RUNG_HALF_LENGTH
+DEPOT_Y = (C.DEPOT_CENTER_Y_BLUE - C.DEPOT_WIDTH / 2, C.DEPOT_CENTER_Y_BLUE + C.DEPOT_WIDTH / 2)
+DEPOT_DEPTH = C.DEPOT_DEPTH
 OUTPOST_Y = (0.0, 49.84 * IN)
-OUTPOST_CENTER_Y = 26.22 * IN  # tag 29, NOT constants.OUTPOST_CENTER_Y_BLUE
+OUTPOST_CENTER_Y = C.OUTPOST_CENTER_Y_BLUE  # tag 29
 CHUTE_Z = (28.13 * IN, 35.13 * IN)
 CHUTE_HALF_WIDTH = 31.8 / 2 * IN
 CORRAL_Z = (1.88 * IN, 8.88 * IN)
@@ -82,7 +80,8 @@ DS_BASE_TOP = 36.8 * IN
 WALL_TOP = 78.8 * IN
 GUARDRAIL_TOP = 20.0 * IN
 CENTER_LINE = (324.61 * IN, 326.61 * IN)
-STARTING_LINE = (156.61 * IN, 158.61 * IN)  # blue ROBOT STARTING LINE, against the HUB and TRENCH faces
+# the blue ROBOT STARTING LINE tape, against the HUB and TRENCH faces
+STARTING_LINE = (C.ALLIANCE_ZONE_DEPTH - 2.0 * IN, C.ALLIANCE_ZONE_DEPTH)
 
 # 3 x 5 letters for the "REBUILT" graphics
 _LETTERS = {"R": "110101110101101", "E": "111100110100111", "B": "110101110101110", "U": "101101101101111",
@@ -379,7 +378,7 @@ def _tower(a: Alliance, ap: FieldAppearance) -> Parts:
     col = ap.alliance[a]
     yc = TOWER_Y
     p.box((0.0, yc - 19.5 * IN, 0.0), (45.18 * IN, yc + 19.5 * IN, 0.0064), srgb(22, 22, 24), obj)  # base plate
-    gap, t = TOWER_UPRIGHT_GAP / 2, 1.5 * IN
+    gap, t = TOWER_UPRIGHT_GAP / 2, C.TOWER_UPRIGHT_THICKNESS
     ux0, ux1 = TOWER_UPRIGHT_X
     for s in (-1, 1):
         yi = yc + s * gap
@@ -388,10 +387,10 @@ def _tower(a: Alliance, ap: FieldAppearance) -> Parts:
         ym = (lo + hi) / 2
         # grey supports back to the wall: a horizontal tube, a diagonal brace and a gusset (APPROX)
         p.box((0.0, ym - 0.022, 35.125 * IN), (ux0, ym + 0.022, 36.875 * IN), ap.steel, obj)
-        p.beam((0.0, ym, 28.4 * IN), (ux0 * 0.55, ym, 35.2 * IN), 0.035, ap.steel, obj)
+        p.beam((0.0, ym, C.TOWER_SUPPORT_CLEARANCE), (ux0 * 0.55, ym, 35.2 * IN), 0.035, ap.steel, obj)
         p.beam((ux0 * 0.7, ym, 36.8 * IN), (ux0, ym, 43.375 * IN), 0.03, ap.steel, obj)
     for z in C.RUNG_HEIGHTS:
-        p.cyl((TOWER_RUNG_X, yc, z), 1.66 / 2 * IN, TOWER_RUNG_HALF, "y", col, obj)
+        p.cyl((TOWER_RUNG_X, yc, z), C.TOWER_RUNG_DIAMETER / 2, TOWER_RUNG_HALF, "y", col, obj)
     return p
 
 

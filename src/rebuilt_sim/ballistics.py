@@ -33,7 +33,8 @@ H = C.HUB_OPENING_HEIGHT
 # FUEL whose center drops through this hexagon goes in (a ball clipping the rim counts as in when
 # its center is inside the rim by at least half a radius)
 APOTHEM = C.HUB_OPENING_ACROSS / 2 - C.FUEL_RADIUS / 2
-_HEX = ((1.0, 0.0), (0.5, math.sqrt(3) / 2), (-0.5, math.sqrt(3) / 2))  # normals of the three pairs of flats
+# normals of the three pairs of flats: flats face the guardrails (+-y), corners the alliance walls
+_HEX = ((0.0, 1.0), (math.sqrt(3) / 2, 0.5), (-math.sqrt(3) / 2, 0.5))
 EDGE = C.HUB_HALF + C.FUEL_RADIUS  # FUEL this close to a HUB's center (face-on) touches its side
 RIM_BOUNCE = 0.35
 SIDE_BOUNCE = 0.3

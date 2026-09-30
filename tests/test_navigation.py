@@ -98,3 +98,32 @@ def test_coincident_fuel_separates():
     for _ in range(10):
         m.step([None] * 6)
     assert np.hypot(*(m.f_pos[a] - m.f_pos[b])) > C.FUEL_RADIUS
+
+
+def test_depot_fuel_pushed_against_the_wall_is_collected():
+    # from its usual spot at the DEPOT a robot's intake doesn't reach the wall; it used to wait
+    # there for FUEL pushed back against the wall until the match ended
+    box = FIELD.depots[Alliance.BLUE]
+    m = _solo("elite", (2.0, box.center[1]))
+    g = np.flatnonzero(m.f_state == GROUND)
+    depot = g[(m.f_pos[g, 0] < box.x1) & (m.f_pos[g, 1] > box.y0) & (m.f_pos[g, 1] < box.y1)]
+    m.f_pos[depot[:6]] = [(C.FUEL_RADIUS + 0.01, box.y0 + 0.15 + 0.155 * k) for k in range(6)]
+    m.f_pos[depot[6:]] = [(C.CENTER_X, 1.0 + 0.16 * k) for k in range(len(depot) - 6)]
+    m.f_vel[depot] = 0.0
+    m.f_settle[depot] = 3
+    assert m.depot_count(Alliance.BLUE) == 6
+    _drive(m, Macro.COLLECT_DEPOT, 10.0)
+    assert m.depot_count(Alliance.BLUE) == 0
+
+
+def test_fuel_inside_the_tower_does_not_trap_a_collector():
+    # FUEL rolls in under the RUNGS, but the UPRIGHTS are closer together than a robot is wide:
+    # a collector used to circle in front of the TOWER for the rest of the match
+    cy = C.TOWER_CENTER_Y_BLUE
+    m = _solo("elite", (2.2, cy))
+    g = np.flatnonzero(m.f_state == GROUND)[:12]
+    m.f_pos[g] = [(0.08 + 0.15 * (k % 3), cy - 0.4 + 0.15 * (k // 3)) for k in range(12)]
+    m.f_vel[g] = 0.0
+    m.f_settle[g] = 3
+    _drive(m, Macro.COLLECT, 10.0)
+    assert m.robots[0].stats.fuel_collected >= 5

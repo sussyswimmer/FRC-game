@@ -24,26 +24,23 @@ The physics runs at 20 Hz (`dt = 0.05 s`). A full match is 166 s: 20 s AUTO, a 3
 ## 2. Field and coordinates
 
 - **Coordinate system:** WPILib's blue-origin frame, in meters. x runs 0 → 16.541 from the blue alliance wall to the red one; y runs 0 → 8.069. This is the frame your robot code already uses.
-- **Geometry from the official 2026 AprilTag layout** (`2026-rebuilt-welded.json`, allwpilib v2026.2.1):
+- **Geometry from the official 2026 Field Dimension Drawings** (FE-2026 rev B, welded field) and the Game Manual. The official AprilTag layout (`2026-rebuilt-welded.json`, allwpilib v2026.2.1) agrees with them, and `tests/test_field.py` checks it does. Blue side:
 
 | Element | Position |
 |---|---|
-| HUB (blue) | 1.207 m square centered at (4.626, 4.035) |
-| Alliance zone | 0 → 4.022 m |
-| HUB line | 4.022 → 5.229 m |
+| HUB | 1.194 m (47 in) square centered at (4.626, 4.035) |
+| Alliance zone | 0 → 4.029 m (the far edge of the ROBOT STARTING LINE, against the HUB) |
+| HUB line | 4.029 → 5.222 m |
 | TRENCH openings | y 0 → 1.279 and 6.790 → 8.069, 0.565 m clearance |
-| TOWER | Set into the alliance wall at y ≈ 3.96 (blue) |
-| OUTPOST | Chute at y ≈ 0.88 (blue) |
+| TOWER | Open frame in the alliance wall, centered at y 3.746 (tag 31). Uprights 1.016–1.105 m from the wall, rungs spanning y 3.149–4.343 |
+| OUTPOST | CHUTE centered at y 0.666 (tag 29) |
+| DEPOT | 42 × 27 in floor area centered at y 5.965, 1.2 m past the TOWER's floor plate |
 
-- **Red side:** every red element is the blue one rotated 180° about the field center.
-- **Estimated, not from official drawings (marked APPROX in `constants.py`):**
-  - DEPOT center y (7.03 m for blue, taken from the broadcast)
+- **Red side:** every red element is the blue one rotated 180° about the field center. The TRENCHes are the exception: both alliances' fixed TRENCH arms are on the scoring-table side (see `field.py`).
+- **Estimated, not in the drawings (marked APPROX in `constants.py`):**
   - OUTPOST feed zone size
   - HUB processing time (0.4–0.9 s)
   - HUB exit speed (1.2–3.2 m/s)
-  - TOWER footprint treated as solid
-
-  Replace these with the official field drawings when you have them.
 
 ## 3. Rules implemented
 
@@ -68,6 +65,11 @@ The physics runs at 20 Hz (`dt = 0.05 s`). A full match is 166 s: 20 s AUTO, a 3
   - Mass-weighted pushing between robots.
   - BUMPs cap speed at 1.6 m/s.
   - TRENCH openings are walls for robots taller than 0.565 m.
+- **The TOWER is an open frame, not a block:**
+  - Its two **uprights** block every robot and FUEL. They are 0.82 m apart, narrower than a robot (0.92 m across its bumpers), so no robot drives in between them.
+  - Its **rungs** (1.19 m long, the LOW RUNG's underside 0.665 m up) block robots taller than that, but FUEL rolls under them.
+  - Its **supports** back to the wall start 0.721 m up. A robot shorter than that can drive along the wall behind the uprights, over the floor plate.
+  - So each robot has a **clearance class**: 0 fits under everything, 1 is stopped by the TRENCH arms, 2 also by the rungs, 3 also by the supports. Every tier is class 0 (0.55 m tall) or class 2 (0.70 m).
 - **Intake:** a rectangle in front of the robot (its width and reach come from the spec) collects FUEL at the spec's rate up to hopper capacity.
 - **Shooting:**
   - Auto-aimed at your own HUB within `min_range`–`max_range`. Robots without a turret must face the HUB within ±15°.
@@ -80,12 +82,15 @@ The physics runs at 20 Hz (`dt = 0.05 s`). A full match is 166 s: 20 s AUTO, a 3
   - A grid-based contact pass keeps them from overlapping.
   - Scored FUEL leaves through 4 exits on the HUB's neutral-zone face, which closes the resource loop.
 - **Jams:** mechanisms occasionally jam while in use, per the spec's `jam_rate`. A jammed robot can still drive but can't intake or shoot.
-- **Climbing:** stop at one of **three climbing positions across your TOWER face** and request a level. It takes `climb_time`, succeeds with `climb_success`, and the robot stays put until it drives off.
-  - Three positions is an assumption. The manual credits up to 2 robots in AUTO and needs 50 TOWER points for TRAVERSAL, so at least two robots must fit. Check it against the drawings.
+- **Climbing:** stop at one of **three climbing positions in front of your TOWER's uprights** and request a level. It takes `climb_time`, succeeds with `climb_success`, and the robot stays put until it drives off.
+  - The positions are the middle of the rungs and 0.95 m to each side, where a robot reaches the 5.875 in (0.15 m) of rung that sticks out past each upright.
+  - Three robots side by side touch each other, which Game Manual 6.5.2 allows while climbing. The manual credits up to 2 robots in AUTO and needs 50 TOWER points for TRAVERSAL, so at least two must fit.
 - **Navigation** (macro actions and bots):
   - Robots cross each HUB line through a TRENCH (short robots only) or over a BUMP, avoiding lanes a dead or climbing robot blocks.
-  - They detour around the TOWER when moving along the wall between DEPOT and OUTPOST.
+  - They detour around the TOWER's front when moving along the wall between DEPOT and OUTPOST. A robot already hugging the wall passes behind the uprights instead, if it is short enough for the supports.
   - A robot that pushes for a second without moving backs off sideways and re-plans. In 60 test matches, no robot stalled for more than 1.4 s.
+  - The bots leave FUEL that has rolled into a TOWER alone: no robot fits between the uprights.
+  - At the DEPOT, a robot drives its intake up to the wall once the FUEL left there is out of reach from its usual spot.
 
 ## 5. Robot tiers, bots and calibration
 
@@ -113,12 +118,12 @@ Scripted drivers copy the Day 1 habits:
 
 | | Simulated | Real Day 1 |
 |---|---|---|
-| FUEL per robot: elite / strong / mid / low | 278 / 58 / 23 / 7 | ~225–250 / 40–70 / 15–30 / <15 |
-| Elite + strong + strong alliance, FUEL (AUTO) | 398 (67), over 40 matches | 393, 394, 409 (73–78) |
-| AUTO share of FUEL | 20.8% | 19.8% |
-| Foul awards per alliance | 0.31 | 0.26 |
-| TOWER points per alliance | 0.46 | 0.48 |
-| Median winning margin | 36 | 42 |
+| FUEL per robot: elite / strong / mid / low | 279 / 58 / 25 / 7 | ~225–250 / 40–70 / 15–30 / <15 |
+| Elite + strong + strong alliance, FUEL (AUTO) | 403 (66), over 40 matches | 393, 394, 409 (73–78) |
+| AUTO share of FUEL | 20.6% | 19.8% |
+| Foul awards per alliance | 0.28 | 0.26 |
+| TOWER points per alliance | 0.47 | 0.48 |
+| Median winning margin | 32 | 42 |
 
 The elite tier runs a little above the per-robot estimate for team 9483. That estimate comes from noisy practice data, so the tier is tuned to reproduce the real elite alliance totals instead.
 
@@ -126,9 +131,9 @@ The elite tier runs a little above the per-robot estimate for team 9483. That es
 
 | | Simulated | Real Day 1 |
 |---|---|---|
-| Median | 52 | 34 |
-| Mean | 76 | 87 |
-| Alliances at 100+ FUEL | 15% | 24% |
+| Median | 55 | 34 |
+| Mean | 79 | 87 |
+| Alliances at 100+ FUEL | 17% | 24% |
 
 The real distribution is more extreme because team 9483 played in a third of the Day 1 matches. Change `DAY1_TIER_WEIGHTS` in `robot.py` to model a later, stronger event.
 
@@ -213,14 +218,17 @@ The 16-env numbers are estimates; throughput should scale roughly with cores.
 
 ## 8. Tests
 
-`python -m pytest -q` runs the 34 tests below, plus step 3's high-fidelity tests ([03-driving-and-aiming.md](03-driving-and-aiming.md) §11):
+`python -m pytest -q` runs the 43 tests below, plus step 3's high-fidelity tests ([03-driving-and-aiming.md](03-driving-and-aiming.md) §11):
 
 - **Broadcast cases** (the section 5.6 tests):
   - the AUTO winner is inactive first (P12)
   - 99 FUEL earns no ENERGIZED (P18)
   - the 3 s grace at 2.9 s vs 3.1 s
   - 90 s of active time for each alliance
-- **Geometry:** checked against the AprilTag positions.
+- **Geometry:**
+  - the HUB, TOWER and OUTPOST checked against the AprilTag positions
+  - the open-frame TOWER: robots meet the uprights or pass under the rungs by height, pass behind the uprights along the wall, and FUEL rolls under the rungs
+  - every climbing position counts as being at the TOWER
 - **Physics invariants:**
   - FUEL is conserved (504)
   - identical seeds give identical matches
@@ -236,6 +244,9 @@ The 16-env numbers are estimates; throughput should scale roughly with cores.
   - robot types given by seat are honored
   - observations stay within [-2, 2]
   - stacked FUEL separates
+- **Regression tests from the geometry fix:**
+  - FUEL pushed back against the DEPOT's wall still gets collected
+  - FUEL inside the TOWER doesn't trap a collecting robot
 
 ## 9. What comes next
 

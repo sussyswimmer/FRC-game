@@ -2,11 +2,12 @@
 
 Coordinates follow WPILib's field convention (blue-alliance origin): x runs along the
 field from the blue alliance wall (x = 0) to the red alliance wall, y runs across it,
-units are meters. Element positions are derived from the official 2026 AprilTag layout
-(allwpilib v2026.2.1, ``2026-rebuilt-welded.json``) and dimensions from the Game Manual
-(TU22). The field is point-symmetric: a red element sits at (L - x, W - y) of its blue
-counterpart. Values marked APPROX are estimates from the event broadcast and should be
-checked against the official field drawings.
+units are meters. Positions and dimensions come from the official 2026 Field Dimension
+Drawings (FE-2026 rev B, welded field) and the Game Manual (TU22), in the inches they are
+given in; the official AprilTag layout (allwpilib v2026.2.1, ``2026-rebuilt-welded.json``)
+agrees with them. The field is point-symmetric: a red element sits at (L - x, W - y) of its
+blue counterpart (the TRENCHes are the one exception, see field.py). Values marked APPROX
+are estimates.
 """
 
 from __future__ import annotations
@@ -32,16 +33,17 @@ FIELD_WIDTH = 8.069
 CENTER_X = FIELD_LENGTH / 2
 CENTER_Y = FIELD_WIDTH / 2
 
-# HUB (from HUB tag faces: x 4.0219..5.2292, y 3.4312..4.6380 on the blue side)
-HUB_CENTER_BLUE = (4.6256, 4.0346)
-HUB_HALF = 0.6035  # 47 in square footprint
+# HUB: a 47 in square body; the blue one's faces are 158.61 and 205.61 in from the blue wall.
+# (Its AprilTags sit 0.27 in proud of the faces.)
+HUB_CENTER_BLUE = (182.11 * IN, 158.84 * IN)
+HUB_HALF = 23.5 * IN
 HUB_OPENING_HEIGHT = 72 * IN
 HUB_PROCESS_TIME = (0.4, 0.9)  # s from entering the top to passing the counter (APPROX)
 HUB_EXIT_SPEED = (1.2, 3.2)  # m/s, FUEL leaves through 4 base exits into the NEUTRAL ZONE (APPROX)
 
 # Zones along x for the blue alliance (mirror for red)
-ALLIANCE_ZONE_DEPTH = 4.0219  # alliance wall to the HUB near face / ROBOT STARTING LINE
-BAND_FAR_X = 5.2292  # far face of the HUB/BUMP/TRENCH line; NEUTRAL ZONE starts here
+ALLIANCE_ZONE_DEPTH = 158.61 * IN  # alliance wall to the HUB near face, the far edge of the ROBOT STARTING LINE
+BAND_FAR_X = 205.61 * IN  # far face of the HUB/BUMP/TRENCH line; NEUTRAL ZONE starts here
 
 # BUMPs flank the HUB: 73.0 in wide (y) x 44.4 in deep (x), 6.5 in tall, 15 deg ramps
 BUMP_DEPTH = 44.4 * IN
@@ -53,20 +55,30 @@ TRENCH_DEPTH = 47.0 * IN
 TRENCH_OPENING_WIDTH = 50.34 * IN
 TRENCH_CLEARANCE = 22.25 * IN  # robots must be this short or less to pass underneath
 
-# TOWER: set into the alliance wall between driver stations 2 and 3 (tags at y 3.7457 / 4.1775)
-TOWER_CENTER_Y_BLUE = 3.9616
-TOWER_WIDTH = 49.25 * IN
-TOWER_DEPTH = 45.0 * IN
-RUNG_HEIGHTS = (27.0 * IN, 45.0 * IN, 63.0 * IN)  # LOW, MID, HIGH
+# TOWER (Game Manual 5.8, drawing GE-26500): an open frame set into the alliance wall between
+# DRIVER STATIONS 2 and 3, centered on its middle AprilTag (31 blue, 15 red). A floor plate, two
+# UPRIGHTS, three RUNGS between and past them, and supports from the UPRIGHTS back to the wall.
+TOWER_CENTER_Y_BLUE = 147.47 * IN
+TOWER_WIDTH = 49.25 * IN  # the TOWER WALL
+TOWER_DEPTH = 45.0 * IN  # from the wall to the front of the floor plate
+TOWER_UPRIGHT_X = (40.0 * IN, 43.51 * IN)  # the UPRIGHTS' back and front faces, from the wall
+TOWER_UPRIGHT_GAP = 32.25 * IN  # between the UPRIGHTS' inner faces
+TOWER_UPRIGHT_THICKNESS = 1.5 * IN
+TOWER_RUNG_HALF_LENGTH = 23.5 * IN  # the RUNGS are 47 in long: 5.875 in past each UPRIGHT
+TOWER_RUNG_DIAMETER = 1.66 * IN
+RUNG_HEIGHTS = (27.0 * IN, 45.0 * IN, 63.0 * IN)  # LOW, MID, HIGH (centers)
+LOW_RUNG_CLEARANCE = RUNG_HEIGHTS[0] - TOWER_RUNG_DIAMETER / 2  # robots this short or less pass under it
+TOWER_SUPPORT_CLEARANCE = 28.4 * IN  # the supports to the wall start this high: shorter robots pass under
 
-# OUTPOST: human-player station at the corner of the alliance wall (tags at y 0.6660 / 1.0978)
-OUTPOST_CENTER_Y_BLUE = 0.8819
+# OUTPOST: human-player station in the alliance-wall corner, 49.84 in wide; its CHUTE and
+# CORRAL openings are centered on AprilTag 29 (blue) / 13 (red)
+OUTPOST_CENTER_Y_BLUE = 26.22 * IN
 OUTPOST_FEED_DEPTH = 0.55  # robot center within this distance of the wall to be fed (APPROX)
 OUTPOST_FEED_HALF_WIDTH = 0.45
 OUTPOST_CHUTE_FUEL = 24
 
-# DEPOT: 42 x 27 in floor area along the alliance wall, opposite corner from the OUTPOST (APPROX y)
-DEPOT_CENTER_Y_BLUE = 7.03
+# DEPOT: 42 x 27 in floor area along the alliance wall, about 47 in past the TOWER's floor plate
+DEPOT_CENTER_Y_BLUE = 234.85 * IN
 DEPOT_WIDTH = 42.0 * IN  # along the wall (y)
 DEPOT_DEPTH = 27.0 * IN  # out from the wall (x)
 DEPOT_FUEL = 24
@@ -121,9 +133,9 @@ PIN_RELEASE_DISTANCE = 72 * IN
 
 # --- high-fidelity physics (docs/03-driving-and-aiming.md) ---------------------------------
 GRAVITY = 9.81
-# The HUB top is a hexagonal funnel opening 41.7 in across, 72 in above the carpet. APPROX: taken
-# as across the flats, with two flats facing the alliance walls; check both against the drawings.
-HUB_OPENING_ACROSS = 41.7 * IN
+# The HUB top is a hexagonal funnel opening 72 in above the carpet, 41.73 in across the flats inside
+# (drawing GE-26300). Its flats face the guardrails and its corners point at the alliance walls.
+HUB_OPENING_ACROSS = 41.73 * IN
 FUEL_MASS = 0.227  # kg, about 0.5 lb (APPROX)
 FUEL_DRAG_COEF = 0.5  # sphere-like foam ball (APPROX)
 AIR_DENSITY = 1.2  # kg/m^3

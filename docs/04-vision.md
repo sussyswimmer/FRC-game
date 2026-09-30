@@ -121,31 +121,26 @@ effect.
 sit 1-3 cm away from the welded layout this project uses (WPILib also ships
 `2026-rebuilt-andymark.json`). The render uses the welded layout.
 
-## 4. Simulator vs drawings (a decision for you)
+## 4. Simulator and drawings
 
-The drawings disagree with a few simulator constants that were estimated in step 2 from the broadcast
-and the tag positions:
+The render and the simulator use one layout. `vision/field_model.py` takes the positions both need
+(HUB, TRENCH, TOWER, OUTPOST, DEPOT, starting line) from `rebuilt_sim/constants.py`, and keeps only the
+details the render alone needs (heights, the HUB's cap and net, the CHUTE).
 
-| Item | Simulator (`constants.py`, `field.py`, `ballistics.py`) | Official drawings | Off by |
-|---|---|---|---|
-| TOWER center y (blue) | 3.9616 m (between tags 31 and 32) | 3.7457 m (tag 31 is the centered tag) | 0.22 m |
-| OUTPOST center y (blue) | 0.8819 m | 0.666 m (tag 29) | 0.22 m |
-| DEPOT center y (blue) | 7.03 m | 5.965 m, next to the TOWER | 1.07 m |
-| Climb positions | 0 and ±0.95 m from the TOWER center | the rungs only span ±0.60 m | past the rung ends |
-| HUB hexagon | flats toward the alliance walls | corners toward the alliance walls | rotated 30° |
-| TOWER collision | solid 45 x 49.25 in box | open frame robots can drive into | shape |
+When step 4 was built, the simulator still used estimates from step 2 that the drawings contradicted.
+They were fixed in their own step afterwards (docs 02 and 03 have the new calibration):
 
-The render follows the drawings, because real cameras will see the real field, and leaves the
-simulator alone, so its calibrated physics is unchanged. The cost: DEPOT FUEL starts about 1 m from the
-drawn DEPOT, and climbing robots hang beside the drawn rungs. Rendered robots are never moved to hide
-this, because that would break the pose labels.
+| Item | Before (step 2 estimate) | Now (drawings) |
+|---|---|---|
+| TOWER center y (blue) | 3.9616 m (between tags 31 and 32) | 3.7457 m (tag 31 is the centered tag) |
+| OUTPOST center y (blue) | 0.8819 m | 0.666 m (tag 29) |
+| DEPOT center y (blue) | 7.03 m | 5.965 m, next to the TOWER |
+| Climb positions | 0 and ±0.95 m from a solid TOWER's face | the same, in front of the uprights; the side robots reach the rung ends |
+| HUB hexagon | flats toward the alliance walls | corners toward the alliance walls |
+| TOWER collision | solid 45 x 49.25 in box | open frame: uprights, rungs and supports block robots by height; FUEL rolls under the rungs |
 
-Options:
-
-- **(A)** Fix the simulator constants in their own small step, then re-run the tests and
-  `calibrate.py` (and `--hifi`) and update docs 02 and 03. Recommended.
-- **(B)** Keep things as they are and live with the offsets (they are in every dataset card).
-- **(C)** Render the simulator's geometry instead of the drawings.
+So DEPOT FUEL starts in the drawn DEPOT and climbing robots hang on the drawn rungs. Datasets
+generated before the fix still carry those offsets: regenerate them.
 
 ## 5. Robots, FUEL and the HUB lights
 
@@ -377,4 +372,3 @@ for it.
 - **Speed:** batching many small shapes into one NumPy pass could make rendering 2-3x faster, if
   generation time ever matters.
 - **Tag layouts:** an option to render the AndyMark tag layout.
-- **The simulator conflicts** (section 4).
