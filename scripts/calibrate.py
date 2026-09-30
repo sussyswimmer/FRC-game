@@ -6,6 +6,7 @@ in data/istanbul2026_day1_match_results.csv.
 
     python scripts/calibrate.py --matches 120
     python scripts/calibrate.py --matches 40 --blue elite strong strong --red mid low low
+    python scripts/calibrate.py --matches 96 --hifi              # the high-fidelity physics
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import numpy as np  # noqa: E402
 
 from rebuilt_sim.bots import ScriptedPolicy  # noqa: E402
 from rebuilt_sim.robot import DAY1_TIER_WEIGHTS  # noqa: E402
-from rebuilt_sim.sim import make_match  # noqa: E402
+from rebuilt_sim.sim import HiFiConfig, MatchConfig, make_match  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,12 +37,12 @@ def draw_alliance(rng: np.random.Generator) -> list[str]:
     return list(rng.choice(names, size=3, p=p / p.sum()))
 
 
-def play(args: tuple[int, list[str] | None, list[str] | None]) -> dict:
-    seed, blue, red = args
+def play(args: tuple[int, list[str] | None, list[str] | None, bool]) -> dict:
+    seed, blue, red, hifi = args
     rng = np.random.default_rng(seed)
     blue = blue or draw_alliance(rng)
     red = red or draw_alliance(rng)
-    m = make_match(blue, red, seed=seed)
+    m = make_match(blue, red, seed=seed, config=MatchConfig(hifi=HiFiConfig()) if hifi else None)
     s = m.run(ScriptedPolicy(m, seed=seed))
     return {
         "alliances": [
@@ -49,7 +50,8 @@ def play(args: tuple[int, list[str] | None, list[str] | None]) -> dict:
              "fouls": sc.minor_fouls + sc.major_fouls, "wasted": sc.wasted_fuel}
             for sc in s.scores
         ],
-        "robots": [(r.spec.name, r.stats.fuel_scored, r.stats.tower_points) for r in m.robots],
+        "robots": [(r.spec.name, r.stats.fuel_scored, r.stats.tower_points, r.stats.fuel_shot,
+                    r.stats.fuel_scored + r.stats.fuel_wasted) for r in m.robots],
         "margin": abs(s.scores[0].total - s.scores[1].total),
     }
 
@@ -77,28 +79,34 @@ def main() -> None:
     ap.add_argument("--blue", nargs=3, help="fixed blue tiers, e.g. elite strong mid")
     ap.add_argument("--red", nargs=3, help="fixed red tiers")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    ap.add_argument("--hifi", action="store_true", help="high-fidelity physics (docs/03-driving-and-aiming.md)")
     args = ap.parse_args()
 
     t0 = time.perf_counter()
-    jobs = [(args.seed + i, args.blue, args.red) for i in range(args.matches)]
+    jobs = [(args.seed + i, args.blue, args.red, args.hifi) for i in range(args.matches)]
     with Pool(args.workers) as pool:
         results = pool.map(play, jobs)
     wall = time.perf_counter() - t0
 
     per_tier = defaultdict(list)
+    shots = defaultdict(lambda: [0, 0])  # tier -> [FUEL shot, FUEL that went into a HUB]
     for res in results:
-        for name, scored, _ in res["robots"]:
+        for name, scored, _, shot, hit in res["robots"]:
             per_tier[name].append(scored)
+            shots[name][0] += shot
+            shots[name][1] += hit
     fuel = [a["fuel"] for res in results for a in res["alliances"]]
     autos = [a["auto"] for res in results for a in res["alliances"]]
     fouls = [a["fouls"] for res in results for a in res["alliances"]]
     wasted = [a["wasted"] for res in results for a in res["alliances"]]
     towers = [a["tower"] for res in results for a in res["alliances"]]
 
-    print(f"{len(results)} matches in {wall:.1f} s on {args.workers} workers\n")
+    print(f"{len(results)} {'high-fidelity ' if args.hifi else ''}matches in {wall:.1f} s on {args.workers} workers\n")
     print("FUEL scored per robot, by tier (Day 1 targets: elite ~225-250, strong ~40-70, mid ~15-30, low <15)")
     for name, xs in sorted(per_tier.items(), key=lambda kv: -statistics.mean(kv[1])):
-        print(f"  {name:14s} n={len(xs):4d}  mean {statistics.mean(xs):6.1f}  sd {statistics.pstdev(xs):6.1f}")
+        shot, hit = shots[name]
+        print(f"  {name:14s} n={len(xs):4d}  mean {statistics.mean(xs):6.1f}  sd {statistics.pstdev(xs):6.1f}"
+              f"  shots in {hit / max(1, shot):4.0%}")
     print("\nAlliance FUEL per match")
     print("  simulated :", describe(fuel))
     if not (args.blue or args.red):

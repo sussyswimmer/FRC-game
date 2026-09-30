@@ -66,6 +66,10 @@ class ActorCritic(nn.Module):
         return net
 
 
+def _box_mode(act_dim: int) -> str:
+    return "continuous_aim" if act_dim == 9 else "continuous"
+
+
 def load_policy(path: str | Path, deterministic: bool = True):
     """Return (policy_fn, action_mode) for a .pt self-play checkpoint or an SB3 .zip model."""
     path = Path(path)
@@ -73,14 +77,14 @@ def load_policy(path: str | Path, deterministic: bool = True):
         from stable_baselines3 import PPO
 
         model = PPO.load(path, device="cpu")
-        mode = "macro" if hasattr(model.action_space, "n") else "continuous"
+        mode = "macro" if hasattr(model.action_space, "n") else _box_mode(model.action_space.shape[0])
 
         def fn(obs: np.ndarray):
             action, _ = model.predict(obs, deterministic=deterministic)
             return action
         return fn, mode
     net = ActorCritic.load(path)
-    mode = "macro" if net.discrete else "continuous"
+    mode = "macro" if net.discrete else _box_mode(net.meta["act_dim"])
 
     def fn(obs: np.ndarray):
         a, _, _ = net.act(torch.as_tensor(obs, dtype=torch.float32), deterministic=deterministic)

@@ -3,10 +3,11 @@
     python scripts/evaluate.py runs/strategy/final_model.zip --tier strong --matches 100
     python scripts/evaluate.py runs/selfplay/latest.pt --tier elite --matches 100
     python scripts/evaluate.py --baseline-only --tier strong --matches 100
+    python scripts/evaluate.py --baseline-only --tier strong --matches 100 --hifi
 
 For each seed the model drives one seat; then the same match (same robots, same seed) is
 replayed with the scripted driver for that robot type in the seat. The difference is what
-your training bought.
+your training bought. A model trained on the high-fidelity physics is compared on it too.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 import statistics
+from dataclasses import asdict
 from multiprocessing import Pool
 
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")  # before numpy loads: one BLAS thread per worker
@@ -22,6 +24,7 @@ import numpy as np  # noqa: E402
 
 from rebuilt_sim.env import EnvConfig  # noqa: E402
 from rebuilt_sim.robot import TIERS  # noqa: E402
+from rebuilt_sim.sim import HiFiConfig  # noqa: E402
 from rebuilt_sim.runner import AGENTS, PolicyMatch, run_config_for  # noqa: E402
 
 _POLICY = None
@@ -37,7 +40,8 @@ def _init(model: str | None) -> None:
 
 def _play(job) -> dict:
     seed, seat, tier, use_model, cfg_args = job
-    cfg = EnvConfig(**cfg_args)
+    hifi = cfg_args.get("hifi")
+    cfg = EnvConfig(**{**cfg_args, "hifi": HiFiConfig(**hifi) if hifi else None})
     tiers = {seat: tier}
     if use_model:
         fn, _ = _POLICY
@@ -71,6 +75,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=10_000)
     ap.add_argument("--baseline-only", action="store_true")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    ap.add_argument("--hifi", action="store_true",
+                    help="high-fidelity physics for --baseline-only (a model uses what it was trained on)")
     args = ap.parse_args()
     if not args.model and not args.baseline_only:
         ap.error("give a model path or --baseline-only")
@@ -81,12 +87,13 @@ def main() -> None:
         _, mode = load_policy(args.model)
         cfg = run_config_for(args.model, mode)
     else:
-        cfg = EnvConfig()
-    cfg_args = {"action_mode": cfg.action_mode, "decision_dt": cfg.decision_dt}
+        cfg = EnvConfig(hifi=HiFiConfig() if args.hifi else None)
+    hifi = asdict(cfg.hifi) if cfg.hifi is not None else None
+    cfg_args = {"action_mode": cfg.action_mode, "decision_dt": cfg.decision_dt, "hifi": hifi}
     seats = [AGENTS.index(args.seat)] if args.seat else [1, 4]
     jobs = [(args.seed + k, seats[k % len(seats)], args.tier) for k in range(args.matches)]
 
-    base_cfg = {"action_mode": "macro", "decision_dt": 0.25}
+    base_cfg = {"action_mode": "macro", "decision_dt": 0.25, "hifi": hifi}
     with Pool(args.workers) as pool:
         baseline = pool.map(_play, [(s, seat, tier, False, base_cfg) for s, seat, tier in jobs])
     summarize("scripted", baseline)

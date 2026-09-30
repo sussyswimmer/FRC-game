@@ -1,6 +1,6 @@
 # HANDOFF: FRC 2026 REBUILT simulator and ML training project
 
-*Written 2026-09-29 at the end of the first Claude Code chat. For the next Claude Code chat, and for the user.*
+*Written 2026-09-29 at the end of the first Claude Code chat, updated 2026-09-30 after the second (step 3). For the next Claude Code chat, and for the user.*
 
 ---
 
@@ -49,7 +49,7 @@ This is the most important instruction in the project.
 | **1. Video analysis:** learn the game from the 2026 İstanbul Regional Day 1 livestream | ✅ Done | `docs/01-video-analysis.md`, `data/istanbul2026_day1_match_results.csv` (21 matches), `data/istanbul2026_day1_score_timelines.csv` (5 match timelines) |
 | **2. Core + strategy simulator:** rules engine, field, physics, calibrated bots, Gymnasium/PettingZoo environments, viewer and playable game, reference training scripts | ✅ Done | `src/rebuilt_sim/`, `scripts/`, `tests/` (34 passing), `docs/02-simulator.md`, `README.md` |
 | **Model training** (the user leads; curriculum in §4) | ⏳ Not started | No models have been trained. `runs/` is empty. |
-| **3. Driving/aiming fidelity** (simulator engineering) | ⏳ Not started | See §5 |
+| **3. Driving/aiming fidelity:** a high-fidelity physics mode (swerve modules, latency, pose estimation, rectangular bumpers, 3D FUEL ballistics) | ✅ Done (chat 2) | `docs/03-driving-and-aiming.md`, `HiFiConfig` in `sim.py`, `drivetrain.py`, `collision.py`, `sensors.py`, `ballistics.py`, 3 new Gymnasium ids, `--hifi` on the scripts, 62 tests |
 | **4. Vision track** (simulator engineering plus user-led training) | ⏳ Not started | See §5 |
 
 **Scope the user chose after step 1:**
@@ -57,20 +57,20 @@ This is the most important instruction in the project.
 - Covered: **match strategy**, **driving/aiming control**, and **vision**.
 - Not chosen: "autonomous routine optimization".
 
-**Order is the user's call.** The strategy environment is ready now, so the training curriculum could start immediately. The alternative is to build step 3 or 4 first.
+**Order is the user's call.** The strategy and high-fidelity environments are both ready, so the training curriculum could start immediately. The alternative is to build step 4 (vision) first.
 
 ---
 
 ## 2. Open questions: ask the user these at the start of the next chat
 
-1. **What next?** Start the training curriculum (§4) on the existing strategy environment, or build step 3 (driving/aiming) or step 4 (vision) first?
+1. **What next?** Start the training curriculum (§4), or build step 4 (vision) first? Step 3 is done: have them try `python scripts/play.py --hifi` and look at `docs/03-driving-and-aiming.md`.
 2. **Background:** how comfortable are they with Python, NumPy, PyTorch, general ML, and reinforcement learning? Adapt depth and pace to the answer.
 3. **Learning path for the training loop:**
    - **(A)** Write PPO from scratch, single-file CleanRL style. This is the most learning; they can then compare against Stable-Baselines3.
    - **(B)** Start with Stable-Baselines3 and study how it works inside.
    - **(C)** Dissect the existing reference scripts.
 4. **Experiment tracking:** TensorBoard (already installed, local), or Weights & Biases (the industry-standard web dashboard; needs a free account)?
-5. **Field-drawing check:** can they get the official 2026 Field Dimension Drawings (§6)? Two simulator assumptions should be checked against them.
+5. **Field-drawing check:** can they get the official 2026 Field Dimension Drawings (§6)? Several simulator assumptions should be checked against them. The most important new one is whether the HUB's 41.7 in hexagonal opening is measured across the flats or across the corners.
 
 ---
 
@@ -80,7 +80,7 @@ This is the most important instruction in the project.
 git clone https://github.com/sussyswimmer/FRC-game.git
 cd FRC-game
 uv sync --all-extras                      # creates .venv (Python 3.11, CPU PyTorch, SB3, Gymnasium, PettingZoo, pygame-ce)
-.venv\Scripts\python.exe -m pytest -q     # expect: 34 passed
+.venv\Scripts\python.exe -m pytest -q     # expect: 62 passed
 .venv\Scripts\python.exe scripts\play.py  # drive a robot yourself (WASD, Q/E, SPACE intake, F shoot, C climb)
 ```
 
@@ -105,6 +105,7 @@ uv sync --all-extras                      # creates .venv (Python 3.11, CPU PyTo
 | Command | What it does |
 |---|---|
 | `scripts\watch.py` | Watch bots, or a trained model, play |
+| `scripts\play.py --hifi`, `scripts\watch.py --hifi` | The same with the high-fidelity physics (step 3) |
 | `scripts\calibrate.py --matches 96` | Compare bot matches with the real Day 1 results |
 | `scripts\evaluate.py MODEL --tier strong --matches 100` | Compare a model with the scripted driver in the same seat on the same matches |
 | `tensorboard --logdir runs` | Training curves |
@@ -125,12 +126,12 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
 | **1 (10%): Workstation and reproducibility** | Set up like a professional | Creates a git branch per experiment line. Verifies `uv sync` and the tests. Starts TensorBoard. Starts the journal. Decides the folder layout for runs and configs | Explains *why*: reproducibility, lockfiles, seeds, and config-as-code | The user can explain how to reproduce any run from its config plus commit hash |
 | **2 (20%): Understand the environment** (the RL version of exploring your data) | Know exactly what the agent sees, does, and is rewarded for | Reads `docs/02-simulator.md` §6, `src/rebuilt_sim/obs.py` and `env.py`. Plays `play.py`. Writes a small script that runs a random policy for N matches. Runs `evaluate.py --baseline-only`. Fills in a baseline table | Explains the Gymnasium API (`reset`/`step`, `terminated` vs `truncated`), observation normalization, and discrete vs continuous action spaces. Quizzes | The journal has a baseline table: random vs scripted, with confidence intervals |
 | **3 (30%): Just-enough RL theory** | Understand what training actually does | Explains concepts back in their own words. Computes a discounted return and a 3-step GAE by hand | Teaches using this game as the running example: MDP, policy, return, discount γ, value, advantage, policy gradient, PPO's clipped objective, GAE λ, entropy bonus, on- vs off-policy, why PPO here | The user can explain every term in PPO's loss and every logged metric |
-| **4 (40%): Design the model** | Build the policy/value network | Writes the PyTorch module: 162 inputs, hidden layers, output head (categorical for the 8 macro actions, Gaussian for continuous). Tests shapes. Counts parameters | Explains the options: layer sizes, activations, shared vs separate actor/critic, initialization. Reviews | A forward pass works on real observations, and the user can justify each design choice |
+| **4 (40%): Design the model** | Build the policy/value network | Writes the PyTorch module: 162 inputs (170 with the high-fidelity physics), hidden layers, output head (categorical for the 8 macro actions, Gaussian for continuous). Tests shapes. Counts parameters | Explains the options: layer sizes, activations, shared vs separate actor/critic, initialization. Reviews | A forward pass works on real observations, and the user can justify each design choice |
 | **5 (50%): Build the training pipeline** | A working PPO loop the user understands end to end | Writes, piece by piece: vectorized envs, rollout buffer, GAE, PPO update, logging, checkpoints, config file, seeding. Unit-tests GAE with hand-computed numbers | Guides one component at a time and reviews each piece. Explains SB3's equivalents if they chose path B | A ~50k-step smoke run works end to end: it logs to TensorBoard, and a checkpoint saves and reloads |
 | **6 (60%): First real run and debugging** | Learn to read curves and debug RL | Runs the first real training (e.g. 1–3M steps, macro actions, "strong" robot). Watches reward, episode length, entropy, approx_kl, clip fraction, explained variance, value loss, and the match stats | Explains what healthy and unhealthy curves look like, and the RL debugging checklist: reward scale, advantage normalization, learning rate, entropy collapse, reward hacking | The user can explain every curve in their run and what it says |
 | **7 (70%): Evaluate like a professional** | Prove what the model does, with statistics | Evaluates on fresh seeds (paired comparison with `evaluate.py`), reviews play in `watch.py`, finds failure cases, writes an evaluation report | Explains held-out evaluation, paired comparisons, confidence intervals, and qualitative review | A numbers-backed statement: "model X beats the baseline by Y ± Z" (or honestly doesn't) |
 | **8 (80%): Iterate with experiments** | The scientific loop: hypothesis → one change → run → compare | Plans and runs 3–5 experiments: reward shaping, curriculum, a small hyperparameter sweep, an ablation. Logs each in the journal | Explains experimental design: one variable at a time, seeds, significance, and avoiding overfitting to the evaluation | A documented improvement, or a documented negative result |
-| **9 (90%): Scale up** | Generalize and go multi-agent | Trains across robot tiers (the observation includes robot capabilities). Tries 3v3 self-play (opponent pools, non-stationarity). Optionally continuous control | Explains self-play pitfalls, league training, and why continuous control needs far more steps | A policy that handles several robot types or beats the bots in 3v3, with evidence |
+| **9 (90%): Scale up** | Generalize and go multi-agent | Trains across robot tiers (the observation includes robot capabilities). Tries 3v3 self-play (opponent pools, non-stationarity). Optionally continuous control, on the high-fidelity envs from step 3 (driving, and aiming with `continuous_aim`) | Explains self-play pitfalls, league training, and why continuous control needs far more steps; explains the sim-to-real reasons behind latency, sensor noise and traction | A policy that handles several robot types or beats the bots in 3v3, with evidence |
 | **10 (100%): Ship it** | Hand it over the way a team would | Versions the model (git tag plus a models folder), writes a **model card** (intended use, training setup, metrics, limitations, failure modes), exports it (TorchScript/ONNX), measures inference latency, writes a retrospective | Explains model cards, versioning, export and deployment, and how this could help an FRC team (strategy advisor, scouting simulations, auto choices) | Someone else could reproduce and use the model from the repo alone |
 
 **Facts the curriculum will lean on:**
@@ -154,14 +155,12 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
 
 ## 5. Remaining simulator engineering (Claude may build it, one step at a time, with the user's go-ahead)
 
-**Step 3: driving and aiming fidelity** (for training low-level control):
+**Step 3: driving and aiming fidelity** is ✅ done (chat 2). See `docs/03-driving-and-aiming.md`. Follow-ups it left, if wanted:
 
-- Physics step 0.02 s (WPILib's loop rate) instead of 0.05 s.
-- Swerve-module dynamics: module steering and drive, motor current and torque limits, wheel slip.
-- Latency and sensor noise.
-- Rectangular robot footprints instead of circles.
-- Real 3D FUEL ballistics into the 72 in HUB opening, with launch speed and angle as actions, instead of a hit probability.
-- Keep the same rules engine and tests, and add a "high-fidelity" config flag.
+- Tank-drive robots (the 2026 KitBot): every robot is swerve now.
+- Magnus lift from backspin in the FUEL flight model.
+- Shots blocked by robots; vision latency; robots hiding AprilTags from each other.
+- `ChassisSpeeds.discretize`-style skew correction for the bots' driving.
 
 **Step 4: vision** (for training detection and localization):
 
@@ -187,6 +186,8 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
 | OUTPOST feed-zone size and human-player feed rate (4 FUEL/s) | `constants.py`, `sim.py` | OUTPOST strategy |
 | HUB processing time (0.4–0.9 s) and exit speed (1.2–3.2 m/s) | `constants.py` | Grace-window scoring, FUEL recirculation |
 | Official manual version used: TU22 (final) | `docs/01-video-analysis.md` | All point values and timings |
+| HUB opening: 41.7 in hexagon **across the flats**, flats facing the alliance walls | `constants.HUB_OPENING_ACROSS`, `ballistics.py` | High-fidelity scoring; if it is across the corners, the shooter spreads need re-tuning |
+| FUEL mass 0.227 kg, drag coefficient 0.5, no backspin lift | `constants.py` | High-fidelity shot tables and ranges |
 
 ---
 
@@ -205,9 +206,11 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
 | `src/rebuilt_sim/controller.py`, `bots.py` | Macro actions → driving (navigation), and the scripted drivers |
 | `src/rebuilt_sim/obs.py`, `env.py`, `pz_env.py` | What the agent observes; the Gymnasium and PettingZoo environments |
 | `src/rebuilt_sim/viewer.py`, `runner.py`, `policies.py` | Rendering, mixed model/bot matches, model loading |
+| `src/rebuilt_sim/drivetrain.py`, `collision.py`, `sensors.py`, `apriltags.py`, `ballistics.py` | Step 3's high-fidelity physics: swerve modules, rectangular bumpers, the pose estimator and AprilTag layout, 3D FUEL flight and the aim software |
+| `docs/03-driving-and-aiming.md` | Step 3: the high-fidelity physics, its calibration and its RL interface |
 | `scripts/play.py`, `watch.py`, `calibrate.py`, `evaluate.py` | Tools |
 | `scripts/train_ppo.py`, `train_selfplay.py` | **Reference only.** See the rule at the top |
-| `tests/` | 34 tests: rules, field, physics, navigation, environment APIs |
+| `tests/` | 62 tests: rules, field, physics, navigation, environment APIs, and step 3's drivetrain, ballistics and sensors |
 
 ---
 
@@ -234,3 +237,31 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
 
   - An independent code review found 11 bugs, including robots stalling at crossings and only one robot able to climb. All are fixed, each with a regression test.
   - Smoke-test training runs were made only to check that the scripts work, and were deleted. **No trained models exist.**
+
+## 9. What happened in chat 2 (step 3)
+
+- The user said "continue building the game", so chat 2 built **step 3**. That is simulator engineering, which Claude may do. No training was run.
+- **A high-fidelity physics mode** (`MatchConfig(hifi=HiFiConfig())`, `EnvConfig(hifi=...)`, three new Gymnasium ids). The standard strategy physics is untouched and still the default. It was checked bit-for-bit against recorded matches, observations and env rewards from before the change.
+  - **Swerve:** four modules per robot with WPILib motor constants, the velocity loop, current limits, the friction circle and wheel slip. Per-tier hardware reproduces each tier's calibrated speed and acceleration.
+  - **Latency:** 40 ms. **Physics step:** 0.02 s.
+  - **Bumpers:** rectangles, with spin from off-center hits.
+  - **Pose estimate:** odometry, gyro drift, and vision from the official AprilTag layout (now in `data/`).
+  - **3D FUEL ballistics:** into the hexagonal HUB opening. The shooter mechanism lags, and the aim software uses shot tables and shoot-on-the-move lead.
+  - **Manual aiming:** the `continuous_aim` action mode.
+- **Calibration** (`docs/03` §6 and §8):
+  - Shooter spreads were tuned so each tier's stationary hit rate at its sweet range equals its step-2 accuracy. For elite, strong and mid, the drop-off with distance then came close to step 2's hand-tuned falloff without further tuning.
+  - In full bot matches accuracy carries over, but robots score about 20% less FUEL, and full elite alliances reach about 316 instead of 393–409. Per robot, every tier is still inside its real Day 1 range.
+  - Diagnosis: a lone robot collects almost as fast, and FUEL is spread the same way. The loss is slower unloading and cycling under realistic physics:
+    - lining up within a few degrees;
+    - flywheel spin-up;
+    - about 1 s high-arc flights;
+    - 40 ms latency;
+    - an aim interlock that at first waited for full flywheel recovery before every ball. It was changed to start-a-volley / keep-firing hysteresis, as real shooter code does.
+  - Left as documented; tuning the bots' high-fidelity driving to hit the alliance totals is a possible follow-up if the user wants it.
+- **Bugs found and fixed while building, all in the new code:**
+  - the latency queue grew while robots were disabled, so after AUTO every robot acted on 3-second-old commands;
+  - encoder readings for slipping wheels were too extreme;
+  - bots wedged against TRENCH columns and teammates, fixed by steering along what they touch;
+  - bots stuck at the DEPOT, fixed by driving the intake up to the wall.
+- **Official sources:** the WPILib AprilTag layout could be downloaded. The game manual site was blocked by the network policy; the HUB opening (41.7 in hexagon) and FUEL weight (about 0.5 lb) came from search results. Both are marked APPROX.
+

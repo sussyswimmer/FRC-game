@@ -4,12 +4,15 @@
     python scripts/play.py --robot red_0 --tier elite
     python scripts/play.py --teammates mid low --opponents elite strong mid
     python scripts/play.py --drive-auto                      # also drive during AUTO
+    python scripts/play.py --hifi                            # swerve modules, latency, real ballistics
 
 Keyboard: WASD / arrow keys move (screen directions), Q/E rotate, hold SPACE to intake,
 hold F or J to shoot, C to climb, P pause, R restart, ESC quit.
 Gamepad: left stick move, right stick rotate, left trigger intake, right trigger shoot, A climb.
 Robots without a turret auto-aim at their HUB while you hold shoot (turn off with --no-assist).
 During AUTO your robot runs its scripted autonomous routine unless you pass --drive-auto.
+With --hifi (docs/03-driving-and-aiming.md) the robot's aim software sets the shooter and fires
+only once it is on target; the thin outline shows where your robot believes it is.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ import math
 from rebuilt_sim.bots import ScriptedPolicy
 from rebuilt_sim.robot import TIERS, RobotCommand
 from rebuilt_sim.rules import Period
-from rebuilt_sim.sim import Match, MatchConfig
+from rebuilt_sim.sim import HiFiConfig, Match, MatchConfig
 from rebuilt_sim.viewer import Viewer
 
 AGENTS = ("blue_0", "blue_1", "blue_2", "red_0", "red_1", "red_2")
@@ -64,7 +67,8 @@ def new_match(args) -> tuple[Match, int, ScriptedPolicy]:
         tiers[i] = t
     for i, t in zip([i for i in range(6) if i not in mine], args.opponents):
         tiers[i] = t
-    m = Match([TIERS[t] for t in tiers], MatchConfig(), seed=args.seed)
+    cfg = MatchConfig(hifi=HiFiConfig()) if args.hifi else MatchConfig()
+    m = Match([TIERS[t] for t in tiers], cfg, seed=args.seed)
     return m, me, ScriptedPolicy(m, seed=args.seed)
 
 
@@ -77,6 +81,7 @@ def main() -> None:
     ap.add_argument("--drive-auto", action="store_true", help="drive your robot in AUTO too")
     ap.add_argument("--no-assist", action="store_true", help="no auto-aim while shooting")
     ap.add_argument("--speed", type=float, default=1.0, help="simulation speed multiplier")
+    ap.add_argument("--hifi", action="store_true", help="high-fidelity physics (docs/03-driving-and-aiming.md)")
     ap.add_argument("--seed", type=int, default=None)
     args = ap.parse_args()
 

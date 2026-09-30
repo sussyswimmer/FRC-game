@@ -213,7 +213,7 @@ The 16-env numbers are estimates; throughput should scale roughly with cores.
 
 ## 8. Tests
 
-`python -m pytest -q` runs 34 tests:
+`python -m pytest -q` runs the 34 tests below, plus step 3's high-fidelity tests ([03-driving-and-aiming.md](03-driving-and-aiming.md) §11):
 
 - **Broadcast cases** (the section 5.6 tests):
   - the AUTO winner is inactive first (P12)
@@ -239,11 +239,12 @@ The 16-env numbers are estimates; throughput should scale roughly with cores.
 
 ## 9. What comes next
 
-- **Driving and aiming track:**
-  - a finer physics step (`sim_dt=0.02`, as in WPILib)
-  - swerve-module dynamics with motor limits, latency and sensor noise
-  - 3D FUEL ballistics into the 72 in HUB opening (launch speed and angle instead of a hit probability)
-  - robot footprints as rectangles
+- **Driving and aiming track:** ✅ built in step 3 as a high-fidelity physics mode. See [03-driving-and-aiming.md](03-driving-and-aiming.md):
+  - a 0.02 s physics step
+  - swerve modules with motor and traction limits
+  - latency and a pose estimate from odometry and AprilTags
+  - rectangular bumpers
+  - 3D FUEL ballistics with exit speed, hood and turret as actions
 - **Vision track:**
   - a 3D render of the same match state to produce labeled images (FUEL, robots, AprilTags)
   - a detector/localizer trained on your RTX 3070

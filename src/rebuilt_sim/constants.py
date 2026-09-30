@@ -11,6 +11,7 @@ checked against the official field drawings.
 
 from __future__ import annotations
 
+import math
 from enum import IntEnum
 
 IN = 0.0254  # meters per inch
@@ -78,6 +79,8 @@ NEUTRAL_BLOCK_GRID = (12, 34)  # 408 slots = 360 staged + up to 48 un-preloaded 
 FUEL_RADIUS = 5.91 * IN / 2
 FUEL_TOTAL = 504
 MAX_PRELOAD = 8
+# where each FUEL is, as tracked by the simulator
+GROUND, HELD, FLIGHT, HUB, CHUTE = range(5)
 
 # --- match timing (seconds since AUTO starts) ------------------------------------------
 AUTO_LEN = 20.0
@@ -115,6 +118,20 @@ RP_THRESHOLDS = {
 # --- rules the simulator enforces ---------------------------------------------------
 PIN_LIMIT = 3.0  # G418: MINOR after 3 s of pinning, then a MAJOR every further 3 s
 PIN_RELEASE_DISTANCE = 72 * IN
+
+# --- high-fidelity physics (docs/03-driving-and-aiming.md) ---------------------------------
+GRAVITY = 9.81
+# The HUB top is a hexagonal funnel opening 41.7 in across, 72 in above the carpet. APPROX: taken
+# as across the flats, with two flats facing the alliance walls; check both against the drawings.
+HUB_OPENING_ACROSS = 41.7 * IN
+FUEL_MASS = 0.227  # kg, about 0.5 lb (APPROX)
+FUEL_DRAG_COEF = 0.5  # sphere-like foam ball (APPROX)
+AIR_DENSITY = 1.2  # kg/m^3
+# 1/m: air drag slows FUEL by FUEL_DRAG * speed^2
+FUEL_DRAG = 0.5 * AIR_DENSITY * FUEL_DRAG_COEF * math.pi * FUEL_RADIUS ** 2 / FUEL_MASS
+BUMPER_DEPTH = 3.25 * IN  # bumper thickness outside the frame
+MODULE_INSET = 0.065  # m from the frame edge to a swerve module's wheel (MK4i-style modules)
+ROBOT_MAX_HEIGHT = 30.0 * IN  # R107
 
 
 def mirror_point(x: float, y: float) -> tuple[float, float]:

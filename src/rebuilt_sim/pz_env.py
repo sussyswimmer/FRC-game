@@ -16,7 +16,7 @@ from dataclasses import replace
 import numpy as np
 from pettingzoo import ParallelEnv
 
-from .env import OBSERVATION_SPACE, EnvConfig, MatchRunner, action_space
+from .env import EnvConfig, MatchRunner, action_space, observation_space
 
 AGENTS = ("blue_0", "blue_1", "blue_2", "red_0", "red_1", "red_2")
 
@@ -43,7 +43,7 @@ class RebuiltParallelEnv(ParallelEnv):
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
-        return OBSERVATION_SPACE
+        return observation_space(self.cfg)
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):

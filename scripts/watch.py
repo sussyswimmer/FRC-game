@@ -4,6 +4,7 @@
     python scripts/watch.py --blue elite strong mid --red strong low low
     python scripts/watch.py --model runs/strategy/final_model.zip --seat blue_1 --tier strong
     python scripts/watch.py --model runs/selfplay/latest.pt --all        # the model drives all six robots
+    python scripts/watch.py --hifi                                       # high-fidelity physics
 
 Keys: SPACE pause, N next match, UP/DOWN speed, ESC quit.
 """
@@ -17,6 +18,7 @@ import numpy as np
 from rebuilt_sim.robot import DAY1_TIER_WEIGHTS, TIERS
 from rebuilt_sim.runner import AGENTS, PolicyMatch, run_config_for
 from rebuilt_sim.env import EnvConfig
+from rebuilt_sim.sim import HiFiConfig
 from rebuilt_sim.viewer import Viewer
 
 
@@ -29,10 +31,12 @@ def main() -> None:
     ap.add_argument("--blue", nargs=3, choices=sorted(TIERS))
     ap.add_argument("--red", nargs=3, choices=sorted(TIERS))
     ap.add_argument("--speed", type=float, default=2.0)
+    ap.add_argument("--hifi", action="store_true",
+                    help="high-fidelity physics for the bot-only view (a model uses what it was trained on)")
     ap.add_argument("--seed", type=int, default=None)
     args = ap.parse_args()
 
-    policies, cfg = {}, EnvConfig()
+    policies, cfg = {}, EnvConfig(hifi=HiFiConfig() if args.hifi else None)
     if args.model:
         from rebuilt_sim.policies import load_policy
 

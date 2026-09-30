@@ -34,7 +34,7 @@ For anything about **models and training**, your role is **mentor and reviewer, 
 - Don't use autonomous or multi-agent modes (autopilot, ralph, team, workflows, subagents) for training work.
 - Don't skip steps to save time. The learning is the point.
 
-**Boundary:** building or improving the *simulator* is engineering work you may do when the user asks, one step at a time with their go-ahead, as in steps 1–2. That covers physics, rules, bots, rendering, and the data generation for vision. When unsure whether something counts as training, ask.
+**Boundary:** building or improving the *simulator* is engineering work you may do when the user asks, one step at a time with their go-ahead, as in steps 1–3. That covers physics, rules, bots, rendering, and the data generation for vision. When unsure whether something counts as training, ask.
 
 ## How the user works
 
@@ -50,7 +50,8 @@ For anything about **models and training**, your role is **mentor and reviewer, 
 
 ## Conventions
 
-- After changing anything in `src/rebuilt_sim/`, run `.venv\Scripts\python.exe -m pytest -q` (34 tests).
-- If bot behavior or robot tiers change, re-run `scripts/calibrate.py` and update the numbers in `docs/02-simulator.md`.
+- After changing anything in `src/rebuilt_sim/`, run `.venv\Scripts\python.exe -m pytest -q` (62 tests).
+- The strategy physics is the default and is calibrated. High-fidelity changes (`HiFiConfig`, `drivetrain.py`, `collision.py`, `sensors.py`, `ballistics.py`) must leave it unchanged.
+- If bot behavior or robot tiers change, re-run `scripts/calibrate.py` (and `--hifi`) and update the numbers in `docs/02-simulator.md` and `docs/03-driving-and-aiming.md`.
 - Coordinates use WPILib's blue-origin field frame, in meters. The geometry comes from the official 2026 AprilTag layout.
 - `runs/` (training output) and `.venv/` are gitignored. Never commit model checkpoints unless the user decides to.

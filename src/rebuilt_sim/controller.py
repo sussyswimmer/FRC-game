@@ -13,6 +13,7 @@ from enum import IntEnum
 import numpy as np
 
 from . import constants as C
+from .collision import aabb_box, box_contact, half_extents, robot_box
 from .constants import Alliance
 from .field import BAND_X, BUMP_PORTAL_Y, FIELD, TRENCH_PORTAL_Y
 from .robot import ClimbState, Robot, RobotCommand
@@ -293,6 +294,8 @@ class MacroController:
             v = min(vmax, math.sqrt(2 * r.spec.max_accel * d) * 0.85) if final else vmax
             vx, vy = dx / d * v, dy / d * v
         vx, vy = self._avoid(r, vx, vy)
+        if r.rect:
+            vx, vy = self._slide(r, vx, vy)
         if face_travel and (abs(vx) + abs(vy)) > 0.3:
             heading = math.atan2(vy, vx)
         omega = 0.0 if heading is None else max(-r.spec.max_omega, min(r.spec.max_omega, 5.0 * _angle_err(heading, r.heading)))
@@ -305,11 +308,48 @@ class MacroController:
                 continue
             dx, dy = r.x - o.x, r.y - o.y
             d = math.hypot(dx, dy)
-            clear = r.spec.radius + o.spec.radius + 0.25
+            clear = r.reach + o.reach + 0.25
             if 1e-6 < d < clear:
                 k = (clear - d) / clear * r.spec.max_speed
                 vx += dx / d * k
                 vy += dy / d * k
+        return vx, vy
+
+    def _slide(self, r: Robot, vx: float, vy: float) -> tuple[float, float]:
+        """Steer along a wall, field element, teammate or parked robot the bumpers are touching instead
+        of into it. A circle slides off by itself; a swerve robot's wheels grip sideways, so it would
+        stick (high fidelity). Opponents still get pushed: that is defense."""
+        c, s = math.cos(r.heading), math.sin(r.heading)
+        box = (r.x, r.y, c, s, r.spec.length / 2 + 0.03, r.spec.width / 2 + 0.03)
+        touching = []
+        ext_x, ext_y = half_extents(box)
+        if r.x - ext_x < 0:
+            touching.append((1.0, 0.0))
+        if r.x + ext_x > C.FIELD_LENGTH:
+            touching.append((-1.0, 0.0))
+        if r.y - ext_y < 0:
+            touching.append((0.0, 1.0))
+        if r.y + ext_y > C.FIELD_WIDTH:
+            touching.append((0.0, -1.0))
+        reach = r.reach + 0.03
+        for x0, x1, y0, y1 in self.match._robot_boxes[not r.spec.can_trench]:
+            if r.x + ext_x <= x0 or r.x - ext_x >= x1 or r.y + ext_y <= y0 or r.y - ext_y >= y1:
+                continue
+            hit = box_contact(aabb_box(x0, x1, y0, y1), box)
+            if hit is not None:
+                touching.append((hit[0], hit[1]))
+        for o in self.match.robots:
+            if o is r or (o.alliance != r.alliance and o.mobile):
+                continue
+            if abs(o.x - r.x) < reach + o.reach and abs(o.y - r.y) < reach + o.reach:
+                hit = box_contact(robot_box(o), box)
+                if hit is not None:
+                    touching.append((hit[0], hit[1]))
+        for nx, ny in touching:
+            vn = vx * nx + vy * ny
+            if vn < 0:
+                vx -= vn * nx
+                vy -= vn * ny
         return vx, vy
 
     def _own_side_limit(self, r: Robot) -> float:
@@ -321,6 +361,8 @@ class MacroController:
         s = r.spec
         hx, hy = FIELD.hub_centers[r.alliance]
         d = d_pref if d_pref is not None else min(max(s.sweet_range, s.min_range + 0.35), s.max_range - 0.4)
+        lo, hi = self.match.shot_reach(r)  # high fidelity: where the shooter can actually score from
+        d = min(max(d, lo + 0.15), hi - 0.2)
         sign = -1.0 if r.alliance == Alliance.BLUE else 1.0  # direction from HUB toward own wall
         zone_edge = C.ALLIANCE_ZONE_DEPTH if r.alliance == Alliance.BLUE else C.FIELD_LENGTH - C.ALLIANCE_ZONE_DEPTH
         angles = np.linspace(-1.35, 1.35, 19)
@@ -338,11 +380,15 @@ class MacroController:
         k = int(np.argmin(cost))
         return float(xs[k]), float(ys[k])
 
-    def can_shoot_here(self, r: Robot) -> bool:
+    def can_shoot_here(self, r: Robot, x: float | None = None, y: float | None = None) -> bool:
+        """In range of its HUB and legal to shoot, judged at (x, y) (default: where the robot is)."""
+        x = r.x if x is None else x
+        y = r.y if y is None else y
         hx, hy = FIELD.hub_centers[r.alliance]
-        dist = math.hypot(hx - r.x, hy - r.y)
+        dist = math.hypot(hx - x, hy - y)
+        x = x + r.vx * self.match.lookahead  # with command latency, judge where the shot will leave from
         return (r.spec.min_range <= dist <= r.spec.max_range
-                and FIELD.in_alliance_zone(r.alliance, r.x, r.spec.radius * 0.5))
+                and FIELD.in_alliance_zone(r.alliance, x, r.spec.radius * 0.5) and self.match.can_reach(r, dist))
 
     # ---------------------------------------------------------------- macros
     def _idle(self, r: Robot, mem: RobotMemory) -> RobotCommand:
@@ -415,6 +461,8 @@ class MacroController:
         mem.sweep_phase += self.match.cfg.dt
         sweep = 0.3 * math.sin(mem.sweep_phase * 2.0)
         gx = (box.x1 if r.alliance == Alliance.BLUE else box.x0) + sign * (r.spec.radius - 0.1)
+        if r.rect:  # a flat bumper pins FUEL against the wall: bring the intake right up to it
+            gx = (0.0 if r.alliance == Alliance.BLUE else C.FIELD_LENGTH) + sign * (r.front + 0.06)
         vx, vy, om, _ = self._drive(r, gx, cy + sweep, heading=wall_heading, arrive=0.05)
         return RobotCommand(vx, vy, om, intake=True)
 
@@ -487,7 +535,7 @@ class MacroController:
         for o in m.robots:
             if o.alliance == r.alliance or not o.mobile:
                 continue
-            if m.period == Period.ENDGAME and FIELD.in_climb_zone(o.alliance, o.x, o.y, o.spec.radius):
+            if m.period == Period.ENDGAME and FIELD.in_climb_zone(o.alliance, o.x, o.y, o.extent_x):
                 continue  # G420
             score = o.fuel * (2.0 if m.hub_active(o.alliance) else 1.0) - math.hypot(o.x - r.x, o.y - r.y) * 2.0
             if score > best_score:
@@ -512,5 +560,5 @@ class MacroController:
         gx, gy = mem.target
         heading = math.pi if r.alliance == Alliance.BLUE else 0.0
         vx, vy, om, _ = self._drive(r, gx, gy, heading=heading, arrive=0.05)
-        in_zone = FIELD.in_climb_zone(r.alliance, r.x, r.y, r.spec.radius)
+        in_zone = FIELD.in_climb_zone(r.alliance, r.x, r.y, r.extent_x)
         return RobotCommand(vx, vy, om, climb=r.spec.climb_level if in_zone else 0)
