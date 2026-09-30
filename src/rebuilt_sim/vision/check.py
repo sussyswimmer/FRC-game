@@ -24,7 +24,7 @@ def validate(root, decode_tags: int = 0, progress=print) -> dict:
     if decode_tags:
         from pupil_apriltags import Detector
 
-        detector = Detector(families="tag36h11")
+        detector = Detector(families="tag36h11", quad_decimate=1.0)  # full resolution: the most accurate corners
     tags = {"checked": 0, "read": 0, "wrong_id": 0, "corner_err_px": []}
     for rec in load_records(root):
         images += 1
@@ -75,16 +75,16 @@ def contact_sheet(root, out, count: int = 16, columns: int = 4, split: str | Non
     from .overlay import draw_labels
 
     root = Path(root)
-    records = list(load_records(root, split))
-    if not records:
+    total = sum(1 for _ in load_records(root, split))  # count first, then keep only the chosen records
+    if not total:
         raise ValueError(f"no records in {root}")
     rng = np.random.default_rng(seed)
-    pick = rng.choice(len(records), min(count, len(records)), replace=False)
+    pick = {int(i) for i in rng.choice(total, min(count, total), replace=False)}
     tiles = []
-    for i in sorted(int(i) for i in pick):
-        rec = records[i]
-        image = np.asarray(Image.open(root / rec["image"]).convert("RGB"))
-        tiles.append(draw_labels(image, rec["objects"], amodal=amodal))
+    for i, rec in enumerate(load_records(root, split)):
+        if i in pick:
+            image = np.asarray(Image.open(root / rec["image"]).convert("RGB"))
+            tiles.append(draw_labels(image, rec["objects"], amodal=amodal))
     tw, th = 480, 300
     rows = math.ceil(len(tiles) / columns)
     sheet = Image.new("RGB", (columns * tw, rows * th), (20, 20, 20))

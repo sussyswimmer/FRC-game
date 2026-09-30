@@ -10,8 +10,8 @@ object would cover if nothing were in front of it (its coverage). From those:
   (still clipped to the image). "Amodal" is the vision term for "including the hidden parts".
 - **visibility:** visible pixels / covered pixels. 1 = in full view, 0.2 = mostly hidden.
 - **truncation:** the fraction of the object that falls outside the image (cut off by the image
-  edge): exact for FUEL (its round silhouette is sampled), from the box around its projected 3D
-  bounding points for everything else. None when part of it is behind the camera.
+  edge, or behind the camera): exact for FUEL (its round silhouette is sampled); for everything
+  else, the share of points spread through its 3D box that the camera can't see.
 
 Conventions (see docs/04-vision.md):
 
@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .camera import Camera, rodrigues
-from .render import Frame
+from .render import NEAR, Frame
 
 CATEGORIES = ("fuel", "robot", "apriltag", "hub", "tower", "trench", "bump", "outpost", "depot")
 
@@ -45,33 +45,47 @@ class ObjectInfo:
     points: np.ndarray | None = None  # (m, 3) field-frame points that bound it (for truncation)
     corners: np.ndarray | None = None  # (4, 3) AprilTag black-square corners (BL, BR, TR, TL)
     sphere: tuple[np.ndarray, float] | None = None  # FUEL: center and radius
+    children: tuple[int, ...] = ()  # ids of objects that are part of it (the tags on a structure)
 
 
 _GRID = (np.arange(16) + 0.5) / 16  # stratified sample positions in [0, 1]
 
 
-def _outside_fraction(camera: Camera, x: np.ndarray, y: np.ndarray) -> float:
-    """Fraction of normalized image points (X/Z, Y/Z) that land outside the image. Points beyond the
-    lens model's valid radius count as outside (they would fold back in if pushed through it)."""
+def _lens_ok(camera: Camera, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Which normalized image points (X/Z, Y/Z) the lens model can map to pixels. Beyond about 1.2
+    times the image corners' radius a distortion polynomial may fold back into the image, so points
+    out there are treated as outside it (Intrinsics.lens_error checks the model up to that radius)."""
     intr = camera.intrinsics
+    if not any(intr.dist):
+        return np.ones(np.shape(x), dtype=bool)
     w, h = intr.width, intr.height
-    inside = np.ones(x.shape, dtype=bool)
-    if any(intr.dist):
-        cu, cv = np.array([-0.5, w - 0.5, -0.5, w - 0.5]), np.array([-0.5, -0.5, h - 0.5, h - 0.5])
-        ux, uy = intr.undistort(cu, cv)
-        inside &= x * x + y * y <= 1.2 ** 2 * float(np.max(ux * ux + uy * uy))
+    ux, uy = intr.undistort(np.array([-0.5, w - 0.5, -0.5, w - 0.5]), np.array([-0.5, -0.5, h - 0.5, h - 0.5]))
+    return x * x + y * y <= 1.2 ** 2 * float(np.max(ux * ux + uy * uy))
+
+
+def _inside(camera: Camera, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Which normalized image points (X/Z, Y/Z) land inside the image."""
+    intr = camera.intrinsics
     u, v = intr.distort(x, y)
-    inside &= (u >= -0.5) & (u <= w - 0.5) & (v >= -0.5) & (v <= h - 0.5)
-    return float(1.0 - inside.mean())
+    return _lens_ok(camera, x, y) & (u >= -0.5) & (u <= intr.width - 0.5) & (v >= -0.5) & (v <= intr.height - 0.5)
+
+
+def _outside_fraction(camera: Camera, x: np.ndarray, y: np.ndarray) -> float:
+    """Fraction of normalized image points (X/Z, Y/Z) that land outside the image."""
+    return float(1.0 - _inside(camera, x, y).mean())
 
 
 def _truncation(camera: Camera, info: "ObjectInfo") -> float | None:
+    """The fraction of an object outside the image (1 = all of it); parts behind the camera count as
+    outside. For FUEL: the share of its round silhouette. For everything else: the share of points
+    spread through its 3D box (or across a tag's face) that the camera can't see, whatever is in
+    front of them. None only for objects without geometry."""
     if info.sphere is not None:  # FUEL: sample its silhouette, the disk the tangent rays touch
         center, r = info.sphere
         c = camera.to_camera(np.asarray(center)[None])[0]
         d2 = float(c @ c)
         if d2 <= r * r:
-            return None
+            return 1.0  # the lens is inside the ball
         base = c * (1.0 - r * r / d2)
         rad = r * np.sqrt(1.0 - r * r / d2)
         a = np.cross(c, (1.0, 0.0, 0.0) if abs(c[0]) < 0.9 * np.sqrt(d2) else (0.0, 1.0, 0.0))
@@ -79,17 +93,39 @@ def _truncation(camera: Camera, info: "ObjectInfo") -> float | None:
         b = np.cross(c, a) / np.sqrt(d2)
         rr, th = np.meshgrid(np.sqrt(_GRID), _GRID * 2 * np.pi)
         pts = base + rad * (rr * np.cos(th)).reshape(-1, 1) * a + rad * (rr * np.sin(th)).reshape(-1, 1) * b
-        if (pts[:, 2] <= 1e-6).any():
-            return None
-        return _outside_fraction(camera, pts[:, 0] / pts[:, 2], pts[:, 1] / pts[:, 2])
+        front = pts[:, 2] > NEAR
+        if not front.any():
+            return 1.0
+        inside = 1.0 - _outside_fraction(camera, pts[front, 0] / pts[front, 2], pts[front, 1] / pts[front, 2])
+        return float(1.0 - inside * front.mean())
     if info.points is None:
         return None
-    pc = camera.to_camera(info.points)
-    if (pc[:, 2] <= 1e-6).any():
-        return None  # partly behind the camera: its projection is unbounded
-    x, y = pc[:, 0] / pc[:, 2], pc[:, 1] / pc[:, 2]
-    gx, gy = np.meshgrid(x.min() + _GRID * (x.max() - x.min()), y.min() + _GRID * (y.max() - y.min()))
-    return _outside_fraction(camera, gx.ravel(), gy.ravel())
+    pc = camera.to_camera(_spread(np.asarray(info.points, dtype=np.float64)))
+    front = pc[:, 2] > NEAR
+    inside = np.zeros(len(pc), dtype=bool)
+    if front.any():
+        x, y = pc[front, 0] / pc[front, 2], pc[front, 1] / pc[front, 2]
+        inside[front] = _inside(camera, x, y)
+    return float(1.0 - inside.mean())
+
+
+_T8 = (np.arange(8) + 0.5) / 8
+
+
+def _spread(points: np.ndarray) -> np.ndarray:
+    """Sample points spread through an object: through its box when given its 8 corners (in x, y, z
+    bit order), across its face when given 4 (top-left, top-right, bottom-right, bottom-left)."""
+    if len(points) == 8:
+        u, v, w = (g.ravel()[:, None] for g in np.meshgrid(_T8, _T8, _T8, indexing="ij"))
+        c = points.reshape(2, 2, 2, 3)
+        return ((1 - u) * ((1 - v) * ((1 - w) * c[0, 0, 0] + w * c[0, 0, 1]) + v * ((1 - w) * c[0, 1, 0] + w * c[0, 1, 1]))
+                + u * ((1 - v) * ((1 - w) * c[1, 0, 0] + w * c[1, 0, 1]) + v * ((1 - w) * c[1, 1, 0] + w * c[1, 1, 1])))
+    if len(points) == 4:
+        u, v = (g.ravel()[:, None] for g in np.meshgrid(_GRID, _GRID, indexing="ij"))
+        return points[0] + u * (points[1] - points[0]) + v * (points[3] - points[0])
+    lo, hi = points.min(axis=0), points.max(axis=0)
+    u, v, w = (g.ravel()[:, None] for g in np.meshgrid(_T8, _T8, _T8, indexing="ij"))
+    return lo + np.hstack([u, v, w]) * (hi - lo)
 
 
 def _box(u0: int, u1: int, v0: int, v1: int, k: int) -> list[float]:
@@ -107,7 +143,9 @@ def annotate(frame: Frame, camera: Camera, objects: dict[int, ObjectInfo], k: in
         if info is None:
             continue
         u0, u1, v0, v1 = frame.extent[obj]
-        win = frame.obj[v0:v1 + 1, u0:u1 + 1] == obj
+        block = frame.obj[v0:v1 + 1, u0:u1 + 1]
+        # a structure's own tags are part of it, not something in front of it
+        win = np.isin(block, (obj, *info.children)) if info.children else block == obj
         visible = int(win.sum())
         label = {
             "id": obj,
@@ -135,10 +173,14 @@ def annotate(frame: Frame, camera: Camera, objects: dict[int, ObjectInfo], k: in
 def _tag_corners(frame: Frame, camera: Camera, corners: np.ndarray, obj: int, k: int) -> dict:
     """Pixel corners of a tag's black square, and whether each is in the image and unhidden."""
     uv, z = camera.project(corners)
+    pc = camera.to_camera(corners)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        valid = (z > 1e-9) & _lens_ok(camera, pc[:, 0] / pc[:, 2], pc[:, 1] / pc[:, 2])
+    uv[~valid] = np.nan  # behind the camera, or so far out that the lens model would fold it back in
     h, w = frame.obj.shape
     seen = []
-    for (u, v), depth in zip(uv, z):
-        ok = bool(depth > 0 and np.isfinite(u) and np.isfinite(v))
+    for (u, v), ok in zip(uv, valid):
+        ok = bool(ok)
         if ok:
             fu, fv = int(round(u * k + (k - 1) / 2)), int(round(v * k + (k - 1) / 2))
             ok = 0 <= fu < w and 0 <= fv < h and frame.obj[fv, fu] == obj

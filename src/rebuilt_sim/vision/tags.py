@@ -13,7 +13,8 @@ patterns were checked against the official apriltag-imgs PNGs and the 2026 FRC A
 
 Corner order follows the AprilTag library and WPILib: counter-clockwise as seen facing the tag,
 starting at its printed bottom-left corner (bottom-left, bottom-right, top-right, top-left).
-OpenCV's ArUco module lists the same corners clockwise from the top-left instead.
+OpenCV's ArUco AprilTag dictionaries are rotated 180 degrees from the official tags, so ``cv2.aruco``
+returns these corners in the order [1, 0, 3, 2] of this one.
 """
 
 from __future__ import annotations

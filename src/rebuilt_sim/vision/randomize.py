@@ -7,8 +7,9 @@ trained on synthetic images work on real ones (Tobin et al. 2017).
 
 Every range is a field of ``RandomizationConfig`` so it can be changed without editing code
 (``scripts/make_dataset.py --randomization my_ranges.json``). Every value drawn is written into the
-image's labels. The defaults come from what FRC teams actually run (docs/04-vision.md section 5);
-they are data-generation settings, not training choices.
+image's record (``camera``, ``render.light``, ``render.effects``, ``render.appearance``). The
+defaults come from what FRC teams actually run (docs/04-vision.md sections 6 and 7); they are
+data-generation settings, not training choices.
 """
 
 from __future__ import annotations
@@ -88,6 +89,22 @@ class RandomizationConfig:
     jpeg_chance: float = 0.7
     jpeg_quality: tuple[int, int] = (35, 95)
 
+    def __post_init__(self) -> None:
+        for f in fields(self):
+            v = getattr(self, f.name)
+            default = f.default
+            if f.name == "yaw_choices_deg":
+                ok = isinstance(v, tuple) and len(v) > 0 and all(isinstance(x, (int, float)) for x in v)
+            elif isinstance(default, tuple):  # a (lo, hi) range
+                ok = (isinstance(v, tuple) and len(v) == 2 and all(isinstance(x, (int, float)) for x in v)
+                      and v[0] <= v[1])
+            else:
+                ok = isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0
+                if f.name in ("apriltag_role", "second_camera", "defocus_chance", "jpeg_chance"):
+                    ok = ok and v <= 1
+            if not ok:
+                raise ValueError(f"randomization setting {f.name} = {v!r} is not valid (default {default!r})")
+
     @classmethod
     def from_dict(cls, d: dict) -> "RandomizationConfig":
         known = {f.name for f in fields(cls)}
@@ -98,11 +115,12 @@ class RandomizationConfig:
 
 
 def random_intrinsics(preset: CameraPreset, scale: float, rng: np.random.Generator, rc: RandomizationConfig | None,
-                      ) -> tuple[Intrinsics, int]:
+                      supersample: int = 1) -> tuple[Intrinsics, int]:
     """The preset's lens at the output resolution, varied like real units and calibrations vary.
-    Distortion is redrawn until the lens model is valid (see ``Intrinsics.lens_error``); redrawing
-    keeps the accepted lenses spread over the full range, where shrinking bad draws would bias them.
-    Returns the lens and how many draws it took (0: no distortion)."""
+    Distortion is redrawn until the lens model is valid (``Intrinsics.lens_ok``) at the resolution it
+    will be rendered at (``supersample`` times finer: its corner pixels reach a little further out).
+    Redrawing keeps the accepted lenses spread over the full range, where shrinking bad draws would
+    bias them. Returns the lens and how many draws it took (0: no distortion)."""
     w, h = max(16, round(preset.width * scale)), max(16, round(preset.height * scale))
     if rc is None:
         return Intrinsics.from_fov(w, h, preset.hfov_deg), 0
@@ -114,7 +132,7 @@ def random_intrinsics(preset: CameraPreset, scale: float, rng: np.random.Generat
         dist = (rng.uniform(*rc.k1), rng.uniform(*rc.k2), rng.normal(0.0, rc.tangential_sd),
                 rng.normal(0.0, rc.tangential_sd), rng.uniform(*rc.k3))
         k = Intrinsics(w, h, base.fx, fy, cx, cy, tuple(float(d) for d in dist))
-        if k.lens_error(step=max(4, w // 80)) < 1e-6:
+        if k.lens_ok() and k.scaled(supersample).lens_ok():
             return k, tries
     return Intrinsics(w, h, base.fx, fy, cx, cy), 0
 

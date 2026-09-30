@@ -112,6 +112,11 @@ class Intrinsics:
         slope = 1 + r * r * (3 * k1 + r * r * (5 * k2 + 7 * k3 * r * r))  # d(r * radial) / dr
         return float("inf") if (slope <= 0).any() else float(err.max())
 
+    def lens_ok(self, tolerance: float = 1e-6) -> bool:
+        """Whether this lens model is valid over the whole image (see ``lens_error``). The renderer
+        and the dataset's lens sampler both use this, so a lens the sampler accepts always renders."""
+        return not any(self.dist) or self.lens_error(step=max(4, self.width // 160)) <= tolerance
+
     def rays(self) -> np.ndarray:
         """(height, width, 3) ray through each pixel center in the camera frame, scaled so z = 1
         (a hit at ray parameter t is t meters in front of the camera)."""

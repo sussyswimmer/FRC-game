@@ -50,7 +50,7 @@ This is the most important instruction in the project.
 | **2. Core + strategy simulator:** rules engine, field, physics, calibrated bots, Gymnasium/PettingZoo environments, viewer and playable game, reference training scripts | ✅ Done | `src/rebuilt_sim/`, `scripts/`, `tests/` (34 passing), `docs/02-simulator.md`, `README.md` |
 | **Model training** (the user leads; curriculum in §4) | ⏳ Not started | No models have been trained. `runs/` is empty. |
 | **3. Driving/aiming fidelity:** a high-fidelity physics mode (swerve modules, latency, pose estimation, rectangular bumpers, 3D FUEL ballistics) | ✅ Done (chat 2) | `docs/03-driving-and-aiming.md`, `HiFiConfig` in `sim.py`, `drivetrain.py`, `collision.py`, `sensors.py`, `ballistics.py`, 3 new Gymnasium ids, `--hifi` on the scripts, 62 tests |
-| **4. Vision track:** 3D rendering of matches and labeled synthetic images | ✅ Done (chat 3) | `docs/04-vision.md`, `src/rebuilt_sim/vision/`, `scripts/make_dataset.py`, `export_dataset.py`, `check_dataset.py`, `render_view.py`, 83 tests |
+| **4. Vision track:** 3D rendering of matches and labeled synthetic images | ✅ Done (chat 3) | `docs/04-vision.md`, `src/rebuilt_sim/vision/`, `scripts/make_dataset.py`, `export_dataset.py`, `check_dataset.py`, `render_view.py`, 85 tests |
 | **Vision model training** (the user leads; outline in §4b) | ⏳ Not started | No datasets generated yet; `datasets/` is gitignored |
 
 **Scope the user chose after step 1:**
@@ -82,7 +82,7 @@ This is the most important instruction in the project.
 git clone https://github.com/sussyswimmer/FRC-game.git
 cd FRC-game
 uv sync --all-extras                      # creates .venv (Python 3.11, CPU PyTorch, SB3, Gymnasium, PettingZoo, pygame-ce)
-.venv\Scripts\python.exe -m pytest -q     # expect: 83 passed
+.venv\Scripts\python.exe -m pytest -q     # expect: 85 passed
 .venv\Scripts\python.exe scripts\play.py  # drive a robot yourself (WASD, Q/E, SPACE intake, F shoot, C climb)
 ```
 
@@ -115,7 +115,7 @@ uv sync --all-extras                      # creates .venv (Python 3.11, CPU PyTo
 | `scripts\render_view.py --t 30` | What a robot's camera sees at 30 s, with labels drawn on |
 | `scripts\make_dataset.py --name v1 --matches 250 --workers 12 [--dry-run]` | Generate a labeled vision dataset (estimate first) |
 | `scripts\check_dataset.py datasets\v1 --sheet sheet.png --decode-tags 100` | Check a dataset and look at it |
-| `scripts\export_dataset.py datasets\v1 --name NAME --format yolo --classes fuel` | Training files; the user picks classes and filters |
+| `scripts\export_dataset.py datasets\v1 --name NAME --format yolo --classes fuel --box visible --camera-robot keep` | Training files; the user picks format, classes, box style and filters |
 
 ---
 
@@ -231,7 +231,7 @@ Step 4 generates the data (`docs/04-vision.md`). Training a detector follows the
 | `scripts/play.py`, `watch.py`, `calibrate.py`, `evaluate.py` | Tools |
 | `scripts/render_view.py`, `make_dataset.py`, `check_dataset.py`, `export_dataset.py` | Vision tools |
 | `scripts/train_ppo.py`, `train_selfplay.py` | **Reference only.** See the rule at the top |
-| `tests/` | 83 tests: rules, field, physics, navigation, environment APIs, step 3's drivetrain, ballistics and sensors, and step 4's rendering, labels and datasets |
+| `tests/` | 85 tests: rules, field, physics, navigation, environment APIs, step 3's drivetrain, ballistics and sensors, and step 4's rendering, labels and datasets |
 
 ---
 

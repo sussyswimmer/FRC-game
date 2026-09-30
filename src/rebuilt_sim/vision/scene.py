@@ -14,7 +14,7 @@ FUEL held inside robots or being processed inside a HUB are not drawn.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
 
@@ -40,6 +40,16 @@ class MatchLook:
     styles: list[RobotStyle]
     fuel_colors: np.ndarray  # (504, 3) per-FUEL albedo (a little wear variation)
     hub_glow: float = 1.0  # brightness of the HUB lights
+    fuel_base: tuple[float, float, float] = FUEL_COLOR  # the FUEL color before wear
+
+    def record(self) -> dict:
+        """Every appearance value drawn for the match, for the dataset records (linear albedo)."""
+        ap = asdict(self.field.appearance)
+        ap["alliance"] = {Alliance(a).name.lower(): list(c) for a, c in self.field.appearance.alliance.items()}
+        return {"field": ap, "fuel_base": list(self.fuel_base), "hub_glow": self.hub_glow,
+                "robots": [{"team_number": st.number, "bumper": list(st.bumper),
+                            "parts": [{"center": list(p.center), "half": list(p.half), "color": list(p.color),
+                                       "turret": p.turret} for p in st.parts]} for st in self.styles]}
 
 
 def match_look(match: Match, rng: np.random.Generator, randomize: bool = True, field: FieldModel | None = None) -> MatchLook:
@@ -52,7 +62,7 @@ def match_look(match: Match, rng: np.random.Generator, randomize: bool = True, f
         base = np.clip(base * rng.uniform(0.8, 1.15) * rng.uniform(0.95, 1.05, 3), 0.0, 1.0)
     wear = rng.uniform(0.88, 1.05, (C.FUEL_TOTAL, 1)) if randomize else np.ones((C.FUEL_TOTAL, 1))
     glow = float(rng.uniform(0.3, 1.5)) if randomize else 1.0
-    return MatchLook(field, styles, np.clip(base * wear, 0.0, 1.0), glow)
+    return MatchLook(field, styles, np.clip(base * wear, 0.0, 1.0), glow, tuple(float(c) for c in base))
 
 
 def hub_light(match: Match, a: Alliance, look: MatchLook) -> tuple[float, float, float] | None:

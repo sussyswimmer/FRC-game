@@ -303,7 +303,10 @@ def _bumps(a: Alliance, ap: FieldAppearance) -> tuple[Parts, dict[int, ObjectInf
         tex[4::12, col] = srgb(25, 25, 25)
     dark = tuple(0.35 * c for c in ap.steel)
     for side, (ya, yb) in enumerate(BUMP_Y):
-        obj = ids.BUMP + 2 * a + side
+        # side 0 is the low-y BUMP; red is built in blue coordinates and then turned around the field
+        # center, which swaps its sides
+        real_side = side if a == Alliance.BLUE else 1 - side
+        obj = ids.BUMP + 2 * a + real_side
         # ramps: rows of the texture run along y, so vertices 0, 1, 3 = (y low, apex), (y low, edge), (y high, apex)
         for xe in (x0, x1):
             p.poly([(xc, ya, BUMP_APEX), (xe, ya, BUMP_LIP), (xe, yb, BUMP_LIP), (xc, yb, BUMP_APEX)], ap.alliance[a], obj, tex)
@@ -312,7 +315,7 @@ def _bumps(a: Alliance, ap: FieldAppearance) -> tuple[Parts, dict[int, ObjectInf
         for xe in (x0, x1):
             p.poly([(xe, ya, 0.0), (xe, yb, 0.0), (xe, yb, BUMP_LIP), (xe, ya, BUMP_LIP)], dark, obj)
         corners = np.array([(x, y, z) for x in (x0, x1) for y in (ya, yb) for z in (0.0, BUMP_APEX)])
-        infos[obj] = ObjectInfo("bump", {"alliance": a.name.lower()}, corners)
+        infos[obj] = ObjectInfo("bump", {"alliance": a.name.lower(), "side": ("low_y", "high_y")[real_side]}, corners)
     return p, infos
 
 
@@ -519,6 +522,18 @@ def _tag_panels(ap: FieldAppearance) -> tuple[Parts, dict[int, ObjectInfo]]:
     return p, infos
 
 
+def _extent_points(parts: Parts, obj: int) -> np.ndarray:
+    """The 8 corners of the axis-aligned box around every shape drawn with id ``obj``."""
+    cube = np.array([(i, j, k) for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)], dtype=np.float64)
+    pts = [np.asarray(b.center) + (cube * b.half) @ np.asarray(b.rotation).T for b in parts.boxes if b.obj == obj]
+    pts += [np.asarray(p.vertices) for p in parts.polygons if p.obj == obj]
+    pts += [np.asarray(c.center) + (cube * (c.radius, c.radius, c.half_length)) @ np.asarray(c.rotation).T
+            for c in parts.cylinders if c.obj == obj]
+    allp = np.concatenate(pts)
+    lo, hi = allp.min(axis=0), allp.max(axis=0)
+    return np.array([(x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+
+
 def _tag_host(tid: int, x: float, y: float) -> int:
     red = x > L / 2
     a = int(red)
@@ -564,6 +579,12 @@ class FieldModel:
         tag_parts, tag_infos = _tag_panels(ap)
         self.parts.extend(tag_parts)
         self.objects.update(tag_infos)
+        for obj, info in self.objects.items():
+            if obj >= ids.HUB:  # bound each structure by everything drawn for it (net, rungs, chute...)
+                info.points = _extent_points(self.parts, obj)
+        for tid, x, y, _, _ in TAGS:  # a structure's tags are part of it (see labels.annotate)
+            host = self.objects[_tag_host(tid, x, y)]
+            host.children = host.children + (ids.TAG + tid,)
         self.multipart = {obj for obj in self.objects if obj >= ids.HUB} | {ids.ALLIANCE_WALL, ids.ALLIANCE_WALL + 1,
                                                                             ids.GUARDRAIL}
         self._backdrop = _backdrop_texture(np.random.default_rng(ap.seed))

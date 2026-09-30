@@ -35,7 +35,7 @@ Run the commands below from this folder with `.venv\Scripts\python.exe`, or acti
 python -m pytest -q
 ```
 
-83 tests:
+85 tests:
 
 - the rules, the field geometry, the physics invariants and navigation;
 - the Gymnasium/PettingZoo API checkers;
@@ -79,10 +79,10 @@ python scripts/render_view.py --t 30                   # what a robot's camera s
 python scripts/make_dataset.py --name v1 --matches 250 --workers 12 --dry-run    # time and disk estimate
 python scripts/make_dataset.py --name v1 --matches 250 --workers 12              # about 10k labeled images
 python scripts/check_dataset.py datasets/v1 --sheet sheet.png --decode-tags 100  # look at it, check the tags
-python scripts/export_dataset.py datasets/v1 --name yolo_fuel --format yolo --classes fuel
+python scripts/export_dataset.py datasets/v1 --name yolo_fuel --format yolo --classes fuel --box visible --camera-robot keep
 ```
 
-The export is where you choose the classes, box style and filters: those are training decisions. See [docs/04-vision.md](docs/04-vision.md).
+The export is where you choose the format, classes, box style and filters (they are required flags): those are training decisions. See [docs/04-vision.md](docs/04-vision.md).
 
 ## Train
 

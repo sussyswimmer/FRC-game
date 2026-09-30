@@ -14,7 +14,8 @@ end lights every pixel at once: an ambient term, a sky term that brightens upwar
 directional light, a highlight on shiny materials (FUEL), and soft "blob" shadows on the carpet
 under FUEL and robots. The id buffer gives exact, occlusion-aware labels (see ``labels.py``).
 
-Everything is numpy; a 640 x 480 frame of a full match takes tens of milliseconds per core.
+Everything is numpy: about 1.35 s per million rendered pixels on one core for a full match (so
+0.3-1 s for 640 x 480), less for simple scenes.
 """
 
 from __future__ import annotations
@@ -123,7 +124,7 @@ _CUBE = np.array([(i, j, k) for i in (-1, 1) for j in (-1, 1) for k in (-1, 1)],
 class Renderer:
     def __init__(self, intrinsics: Intrinsics, full_windows: bool = False) -> None:
         self.full_windows = full_windows  # test every pixel against every shape (slow; a reference for tests)
-        if any(intrinsics.dist) and intrinsics.lens_error(step=max(4, intrinsics.width // 160)) > 0.01:
+        if not intrinsics.lens_ok(tolerance=0.01):
             raise ValueError(f"lens distortion {intrinsics.dist} folds over inside the image")
         self.intrinsics = intrinsics
         self.rays = intrinsics.rays().astype(np.float32)  # (h, w, 3), camera frame, z = 1
@@ -471,8 +472,8 @@ class Renderer:
             a = (dd * dd).sum(axis=-1)
             b = dd @ c
             disc = b * b - a * ((c @ c) - radii[i] ** 2)
-            hit = disc >= 0.0
-            t = (b - np.sqrt(np.where(hit, disc, 0.0))) / a
+            t = (b - np.sqrt(np.maximum(disc, 0.0))) / a
+            hit = (disc >= 0.0) & (t > NEAR)  # the near side, in front of the camera
 
             def surface(win, dd=dd, t=t, c=c, r=radii[i], color=s.color):
                 p = t[win][:, None] * dd[win]  # camera-frame hit points

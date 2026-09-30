@@ -115,11 +115,13 @@ def test_lens_model_round_trip_and_fold_over():
         Renderer(folds)
     rng = np.random.default_rng(3)
     tries = []
-    for _ in range(25):  # the dataset's lens sampler only returns valid lenses
-        k, n = random_intrinsics(PRESETS[str(rng.choice(list(PRESETS)))], 0.25, rng, RandomizationConfig())
-        assert k.lens_error(step=2) < 1e-6
+    for _ in range(60):  # the lens sampler only returns lenses the renderer accepts at the supersampled size
+        k, n = random_intrinsics(PRESETS[str(rng.choice(list(PRESETS)))], 0.5, rng, RandomizationConfig(), supersample=2)
+        assert k.lens_ok() and k.scaled(2).lens_ok(tolerance=0.01)
         tries.append(n)
     assert max(tries) > 1  # some draws were rejected and redrawn, so the check matters
+    with pytest.raises(ValueError):
+        RandomizationConfig.from_dict({"k1": -0.1})  # a range needs two numbers
 
 
 def test_robot_camera_is_the_mount_on_flat_ground_and_tilts_on_a_bump():
@@ -254,6 +256,25 @@ def test_occlusion_visibility_and_boxes():
     assert ax <= x and ay <= y and x + w <= ax + aw and y + h <= ay + ah
 
 
+def test_review_regressions_in_labels():
+    """Bugs an independent review found: truncation must be a number even for objects reaching
+    behind the camera; a structure's own tags don't hide it; a ball behind the lens covers nothing."""
+    intr = Intrinsics(80, 60, 60.0, 60.0, 39.5, 29.5)
+    cam = Camera.looking(intr, (0.0, 0.0, 0.5), 0.0)
+    wall = Box((1.0, 1.0, 0.5), (2.0, 0.05, 0.5), (0.5, 0.5, 0.5), obj=5)  # from behind the camera to 3 m ahead
+    behind = Sphere((-0.05, 0.0, 0.4), 0.075, (1, 1, 0), 6)  # just behind the lens
+    corners = np.array([(x, y, z) for x in (-1.0, 3.0) for y in (0.95, 1.05) for z in (0.0, 1.0)])
+    objects = {5: ObjectInfo("hub", {}, corners), 6: ObjectInfo("fuel", {}, None, sphere=(np.array((-0.05, 0.0, 0.4)), 0.075))}
+    labels = {o["id"]: o for o in annotate(_render(Scene(spheres=[behind], boxes=[wall]), cam), cam, objects)}
+    assert 0.0 < labels[5]["truncation"] < 1.0 and 6 not in labels
+    m = _match()
+    scene, objects = build_scene(m, _look(m), hide=set(range(6)))
+    scene.spheres = []
+    view = Camera.looking(Intrinsics.from_fov(160, 120, 90.0), (1.2, 4.03, 1.0), 0.0)  # the blue HUB, head-on
+    hub = [o for o in annotate(_render(scene, view), view, objects) if o["id"] == ids.HUB][0]
+    assert hub["visibility"] > 0.999
+
+
 def test_back_facing_tags_are_not_drawn():
     m = _match()
     scene, _ = build_scene(m, _look(m))
@@ -304,6 +325,32 @@ def test_rendered_tag_edges_match_the_labels():
                     assert (f.obj[fv, fu] == ids.TAG + tid) == inside
 
 
+def test_tags_seen_at_an_angle_render_exactly_where_the_labels_say():
+    """At 0, 30 and 50 degrees off-axis, each printed tag covers exactly its projected quadrilateral:
+    same centroid (to 0.02 px) and area (to 0.2%). So when a detector's corners drift at oblique
+    angles, that is the detector's bias, not the labels'."""
+    intr = Intrinsics(80, 60, 75.0, 75.0, 39.5, 29.5)
+    k = 16
+    renderer = Renderer(intr.scaled(k))
+    for tid, side in ((26, 0), (17, 30), (31, 50), (10, -40)):
+        c, n, _, _ = T.tag_frame(tid)
+        a = math.atan2(n[1], n[0]) + math.radians(side)
+        pos = c + 0.9 * np.array([math.cos(a), math.sin(a), 0.0]) + (0.0, 0.0, 0.013)
+        look = c - pos
+        cam = Camera.looking(intr, pos, math.atan2(look[1], look[0]), math.atan2(look[2], math.hypot(look[0], look[1])))
+        quad = T.square(tid, T.TAG_OUTER, 0.002)
+        tag = Polygon(quad, obj=ids.TAG + tid, texture=T.tag_texture(tid), two_sided=False)
+        f = renderer.render(Scene(polygons=[tag]), Camera(intr.scaled(k), cam.position, cam.rotation))
+        v, u = np.nonzero(f.obj == ids.TAG + tid)
+        centroid = np.array([(u.mean() - (k - 1) / 2) / k, (v.mean() - (k - 1) / 2) / k])
+        uv, _ = cam.project(quad)
+        x, y = uv[:, 0], uv[:, 1]
+        cross = x * np.roll(y, -1) - np.roll(x, -1) * y
+        area = cross.sum() / 2
+        exact = np.array([((x + np.roll(x, -1)) * cross).sum(), ((y + np.roll(y, -1)) * cross).sum()]) / (6 * area)
+        assert np.abs(centroid - exact).max() < 0.02 and u.size / k ** 2 == pytest.approx(abs(area), rel=0.002)
+
+
 def test_tag_pose_labels_reproject_to_the_corners():
     m = _match()
     scene, objects = build_scene(m, _look(m))
@@ -322,7 +369,8 @@ def test_tag_pose_labels_reproject_to_the_corners():
 def test_an_independent_detector_reads_the_rendered_tags():
     """The AprilTag C library (the one WPILib and PhotonVision use) must decode every clearly visible
     rendered tag with the labeled ID, and find its corners where the labels say. The library puts
-    pixel centers at +0.5, so its corners are the labels + 0.5."""
+    pixel centers at +0.5, so its corners are the labels + 0.5. (Seen at an angle its corners also
+    drift by up to about 0.3 px: its own bias, see the test above.)"""
     apriltags = pytest.importorskip("pupil_apriltags")
     det = apriltags.Detector(families="tag36h11")
     m = _match()
@@ -394,8 +442,9 @@ def test_camera_effects():
 
 # ------------------------------------------------------------------------------ the dataset
 def _tiny(tmp_path, name, **kw):
-    return DatasetConfig(name=name, out_dir=str(tmp_path), matches=3, frames_per_match=2, cameras_per_frame=2,
-                         time_range=(1.0, 8.0), scale=0.12, supersample=1, hifi=False, masks=True, depth=True, **kw)
+    settings = dict(matches=3, frames_per_match=2, cameras_per_frame=2, time_range=(1.0, 8.0), scale=0.12,
+                    supersample=1, hifi=False, masks=True, depth=True)
+    return DatasetConfig(name=name, out_dir=str(tmp_path), **{**settings, **kw})
 
 
 def test_dataset_generation_end_to_end(tmp_path):
@@ -406,6 +455,7 @@ def test_dataset_generation_end_to_end(tmp_path):
     assert len(records) == 12 == sum(st["images"].values())
     for r in records:
         assert (root / r["image"]).exists() and (root / r["masks"]).exists() and (root / r["depth"]).exists()
+        assert r["render"]["appearance"]["field"]["carpet"] and len(r["render"]["appearance"]["robots"]) == 6
         assert r["split"] == split_of(r["match"]["id"], cfg)
         cam = r["camera"]
         assert len(cam["pose"]["wpilib"]["quaternion"]) == 4 and len(cam["robot_to_camera_wpilib"]["quaternion"]) == 4
@@ -414,12 +464,19 @@ def test_dataset_generation_end_to_end(tmp_path):
         assert (root / name).exists()
     assert "Tags are chiral" in (root / "dataset_card.md").read_text(encoding="utf-8")
     # exporting: the classes and filters are the caller's choice
-    counts = export(root, ExportConfig("coco", "coco", ("fuel", "robot_blue", "robot_red", "apriltag")), progress=lambda s: None)
+    counts = export(root, ExportConfig("coco", "coco", ("fuel", "robot_blue", "robot_red", "apriltag"), "visible", True),
+                    progress=lambda s: None)
     for split in counts["images"]:
         coco = json.loads((root / "exports" / "coco" / "annotations" / f"{split}.json").read_text())
         assert len(coco["images"]) == counts["images"][split]
         assert all(len(a["bbox"]) == 4 and a["category_id"] in (1, 2, 3, 4) for a in coco["annotations"])
-    export(root, ExportConfig("yolo", "yolo-pose", ("fuel", "apriltag"), min_box_side_px=2.0), progress=lambda s: None)
+    export(root, ExportConfig("plain", "yolo", ("fuel", "robot"), "amodal", False), progress=lambda s: None)
+    plain = root / "exports" / "plain"
+    assert "kpt_shape" not in (plain / "data.yaml").read_text()
+    lines = [ln.split() for t in (plain / "labels").rglob("*.txt") for ln in t.read_text().splitlines()]
+    assert lines and all(len(ln) == 5 and ln[0] in ("0", "1") for ln in lines)
+    export(root, ExportConfig("yolo", "yolo-pose", ("fuel", "apriltag"), "visible", True, min_box_side_px=2.0),
+           progress=lambda s: None)
     out = root / "exports" / "yolo"
     assert "kpt_shape" in (out / "data.yaml").read_text()
     labels = list((out / "labels").rglob("*.txt"))
@@ -439,6 +496,16 @@ def test_dataset_generation_end_to_end(tmp_path):
     assert "3 matches already on disk" in said[0]
     with pytest.raises(ValueError):
         generate(_tiny(tmp_path, "b", seed=1), progress=lambda s: None)
+    with pytest.raises(ValueError):
+        generate(_tiny(tmp_path, "b", matches=2), progress=lambda s: None)  # fewer matches than on disk
+    with pytest.raises(ValueError):
+        ExportConfig("..", "yolo", ("fuel",), "visible", True)  # an export name is one plain folder name
+    # overwriting starts clean: nothing of the old run survives
+    generate(_tiny(tmp_path, "b", seed=1, matches=1), progress=lambda s: None, overwrite=True)
+    assert len(list(load_records(tmp_path / "b"))) == 4 and not (tmp_path / "b" / "exports").exists()
+    robots = [o for r in records for o in r["objects"] if o["category"] == "robot"]
+    assert robots and all(isinstance(o["camera_robot"], bool) for o in robots)
+    assert "val: images/val" in (out / "data.yaml").read_text()
 
 
 def test_the_strategy_physics_is_untouched_by_rendering():

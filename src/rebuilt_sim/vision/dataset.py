@@ -28,6 +28,7 @@ import hashlib
 import io
 import json
 import math
+import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -71,7 +72,7 @@ class DatasetConfig:
     splits: tuple[tuple[str, float], ...] = (("train", 0.8), ("val", 0.1), ("test", 0.1))
     masks: bool = False
     depth: bool = False
-    lossless: bool = False  # PNG images (about 6x the disk of JPEG); otherwise JPEG, quality 95 or the effect's
+    lossless: bool = False  # PNG images (about 4x the disk of JPEG); otherwise JPEG, quality 95 or the effect's
     workers: int = 1
     randomization: RandomizationConfig = field(default_factory=RandomizationConfig)
 
@@ -135,13 +136,14 @@ def generate_match(match_id: int, cfg: DatasetConfig) -> list[dict]:
     match = make_match(tiers[:3], tiers[3:], seed=sim_seed, config=MatchConfig(hifi=HiFiConfig() if cfg.hifi else None))
     policy = ScriptedPolicy(match, seed=int(rs["bots"].integers(2 ** 31)))
     look = match_look(match, rs["appearance"], cfg.randomize)
+    appearance = look.record()
     light = random_light(rs["lighting"], rc)
     rigs = []
     for r in match.robots:
         for _ in range(1 + int(rs["rigs"].random() < cfg.randomization.second_camera)):
             preset = PRESETS[str(rs["rigs"].choice(cfg.presets))]
             mount, role = random_mount(r, rs["rigs"], cfg.randomization)
-            intr, tries = random_intrinsics(preset, cfg.scale, rs["rigs"], rc)
+            intr, tries = random_intrinsics(preset, cfg.scale, rs["rigs"], rc, cfg.supersample)
             rigs.append(Rig(r.index, preset, intr, mount, role, tries))
     renderers: dict[int, Renderer] = {}
     times = sample_times(rs["times"], cfg.frames_per_match, *cfg.time_range, cfg.min_gap)
@@ -161,6 +163,9 @@ def generate_match(match_id: int, cfg: DatasetConfig) -> list[dict]:
             cam = robot_camera(match, rig.robot, rig.intrinsics, rig.mount)
             frame = renderers[rig_i].render(scene, Camera(rig.intrinsics.scaled(k), cam.position, cam.rotation), light)
             labels = annotate(frame, cam, objects, k)
+            for o in labels:  # the robot carrying this camera often shows at the image's edge
+                if o["category"] == "robot":
+                    o["camera_robot"] = o["robot_index"] == rig.robot
             effects = frame_effects(rs["effects"], cfg, rig, match.robots[rig.robot])
             image = fx_mod.apply(fx_mod.downsample(frame.color, k), effects, rs["effects"])
             stem = f"m{match_id:05d}_f{f_i:03d}_c{c_i}"
@@ -171,7 +176,7 @@ def generate_match(match_id: int, cfg: DatasetConfig) -> list[dict]:
                 "match": _match_record(match, match_id, sim_seed, tiers, cfg),
                 "camera": _camera_record(rig, cam, k),
                 "robot": _robot_record(match, rig.robot, look),
-                "render": {"light": asdict(light), "effects": effects.to_dict()},
+                "render": {"light": asdict(light), "effects": effects.to_dict(), "appearance": appearance},
                 "objects": [_clean(o) for o in labels],
             })
             records.append(_clean(rec))
@@ -183,16 +188,23 @@ def generate_match(match_id: int, cfg: DatasetConfig) -> list[dict]:
 
 
 def _write_shard(path: Path, records: list[dict]) -> None:
-    """A gzipped JSON-lines file. No timestamp in the gzip header, so reruns give identical bytes."""
+    """A gzipped JSON-lines file. No timestamp in the gzip header, so reruns give identical bytes.
+    Written to a temporary name and then renamed, so an interrupted run never leaves half a shard
+    (a shard on disk means its match is complete)."""
     data = "".join(json.dumps(r, separators=(",", ":")) + "\n" for r in records).encode("utf-8")
-    with open(path, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
-        f.write(data)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
+            f.write(data)
+        raw.flush()
+        os.fsync(raw.fileno())
+    os.replace(tmp, path)
 
 
 def frame_effects(rng: np.random.Generator, cfg: DatasetConfig, rig: Rig, robot) -> fx_mod.Effects:
     """Camera effects for one frame. Motion blur comes from how far the robot turns and drives
     during the exposure: blur (px) = turn rate x exposure time x focal length (px)."""
-    if not cfg.randomize or cfg.effects_strength <= 0:
+    if cfg.effects_strength <= 0:
         return fx_mod.Effects(grayscale=rig.preset.mono)
     rc = cfg.randomization
     fx = fx_mod.random_effects(rng, cfg.effects_strength, mono=rig.preset.mono, rc=rc)
@@ -288,20 +300,35 @@ def _save(root: Path, split: str, stem: str, image: np.ndarray, effects: fx_mod.
     else:
         img.save(root / rel, quality=int(effects.jpeg_quality or 95))
     rec = {"image": rel.as_posix(), "masks": None, "depth": None}
-    if cfg.masks:  # the object id at each output pixel's center sample (+1, so 0 = nothing)
-        ids = frame.obj[k // 2::k, k // 2::k].astype(np.int64) + 1
+    if cfg.masks or cfg.depth:
+        pick = _majority(frame.obj, k)
+    if cfg.masks:  # each output pixel's most common object id among its k x k samples (+1, so 0 = nothing)
+        ids = np.take_along_axis(_blocks(frame.obj, k), pick, axis=-1)[..., 0].astype(np.int64) + 1
         path = Path("masks") / split / f"{stem}.png"
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(ids.astype(np.uint16)).save(root / path)
         rec["masks"] = path.as_posix()
-    if cfg.depth:
-        d = frame.depth[k // 2::k, k // 2::k]
+    if cfg.depth:  # the depth of that same sample
+        d = np.take_along_axis(_blocks(frame.depth, k), pick, axis=-1)[..., 0]
         mm = np.where(np.isfinite(d), np.clip(d * 1000.0, 0, 65535), 0).astype(np.uint16)
         path = Path("depth") / split / f"{stem}.png"
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         Image.fromarray(mm).save(root / path)
         rec["depth"] = path.as_posix()
     return rec
+
+
+def _blocks(a: np.ndarray, k: int) -> np.ndarray:
+    """(h*k, w*k) -> (h, w, k*k): each output pixel's samples."""
+    h, w = a.shape[0] // k, a.shape[1] // k
+    return a[:h * k, :w * k].reshape(h, k, w, k).transpose(0, 2, 1, 3).reshape(h, w, k * k)
+
+
+def _majority(obj: np.ndarray, k: int) -> np.ndarray:
+    """(h, w, 1) index of the sample holding each output pixel's most common id (ties: the first)."""
+    b = _blocks(obj, k)
+    counts = (b[..., :, None] == b[..., None, :]).sum(axis=-1)
+    return counts.argmax(axis=-1)[..., None]
 
 
 # ---------------------------------------------------------------------------- the whole dataset
@@ -322,26 +349,51 @@ def _existing_rows(root: Path, match_id: int, cfg: DatasetConfig) -> list[dict] 
     shard = root / "records" / split_of(match_id, cfg) / f"m{match_id:05d}.jsonl.gz"
     if not shard.exists():
         return None
-    with gzip.open(shard, "rt", encoding="utf-8") as f:
-        return [_index_row(json.loads(line)) for line in f]
+    try:
+        with gzip.open(shard, "rt", encoding="utf-8") as f:
+            return [_index_row(json.loads(line)) for line in f]
+    except (OSError, EOFError, ValueError, KeyError):  # damaged: make that match again
+        return None
 
 
 def _jsonable(cfg: DatasetConfig) -> dict:
     return json.loads(json.dumps(asdict(cfg)))
 
 
+def _code_version() -> str | None:
+    from .card import git_info
+
+    return git_info()["commit"]
+
+
 def generate(cfg: DatasetConfig, progress=print, overwrite: bool = False) -> dict:
     """Generate the whole dataset, in parallel with ``cfg.workers`` processes. Matches already on
     disk are kept, so an interrupted run resumes where it stopped (unless ``overwrite``)."""
     root = Path(cfg.out_dir) / cfg.name
+    if overwrite:  # start clean: leftovers from another run would mix into this one
+        import shutil
+
+        for sub in ("records", "images", "masks", "depth", "exports"):
+            shutil.rmtree(root / sub, ignore_errors=True)
     root.mkdir(parents=True, exist_ok=True)
     cfg_file = root / "config.json"
-    same = {k: v for k, v in _jsonable(cfg).items() if k not in ("matches", "workers")}
+    # settings that don't change what gets generated: where it goes, how many, how fast
+    free = ("name", "out_dir", "matches", "workers")
     if cfg_file.exists() and not overwrite:
-        old = {k: v for k, v in json.loads(cfg_file.read_text(encoding="utf-8")).items() if k not in ("matches", "workers")}
-        if old != same:
-            raise ValueError(f"{root} was made with a different config: pick another --name, or --overwrite")
-    cfg_file.write_text(json.dumps(_jsonable(cfg), indent=2), encoding="utf-8")
+        old = json.loads(cfg_file.read_text(encoding="utf-8"))
+        if old.get("_schema") != SCHEMA:
+            raise ValueError(f"{root} was made by an older version of the generator: use another --name, or --overwrite")
+        if {k: v for k, v in old.items() if k not in free and not k.startswith("_")} != \
+                {k: v for k, v in _jsonable(cfg).items() if k not in free}:
+            raise ValueError(f"{root} was made with different settings: use another --name, or --overwrite")
+        if old.get("_code") != _code_version():
+            progress("note: the vision code changed since this dataset was started (see manifest.json)")
+    on_disk = [int(p.name[1:6]) for p in (root / "records").glob("*/m*.jsonl.gz")] if root.exists() else []
+    if on_disk and max(on_disk) >= cfg.matches and not overwrite:
+        raise ValueError(f"{root} already has matches up to {max(on_disk)}: ask for at least {max(on_disk) + 1} "
+                         "matches, or --overwrite")
+    cfg_file.write_text(json.dumps({**_jsonable(cfg), "_schema": SCHEMA, "_code": _code_version()}, indent=2),
+                        encoding="utf-8")
     start = time.perf_counter()
     rows: dict[int, list[dict]] = {}
     todo = []

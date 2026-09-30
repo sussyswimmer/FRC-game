@@ -31,7 +31,7 @@ uv sync --all-extras                                          # adds Pillow and 
 .venv\Scripts\python.exe scripts\render_view.py --overview    # a high view over the field
 .venv\Scripts\python.exe scripts\make_dataset.py --name smoke --matches 2 --frames 4
 .venv\Scripts\python.exe scripts\check_dataset.py datasets\smoke --sheet sheet.png --decode-tags 20
-.venv\Scripts\python.exe scripts\export_dataset.py datasets\smoke --name yolo_fuel --format yolo --classes fuel
+.venv\Scripts\python.exe scripts\export_dataset.py datasets\smoke --name yolo_fuel --format yolo --classes fuel --box visible --camera-robot keep
 ```
 
 A real dataset uses all your cores. First ask for an estimate with `--dry-run`:
@@ -42,9 +42,10 @@ A real dataset uses all your cores. First ask for an estimate with `--dry-run`:
 ```
 
 - **Disk:** about 45 KB per 640 x 400 image with its labels. `--png` stores lossless images at about
-  six times that. Your C: drive is tight, so `--out D:\datasets` puts the data on another drive.
+  four times that (twice for monochrome cameras, seven times for color). Your C: drive is tight, so `--out D:\datasets` puts the data on another drive.
 - **RAM:** each worker needs about 0.5 GB. On 16 GB, 12 workers is safe.
-- **Resuming:** run the same command again and it continues from where it stopped.
+- **Resuming:** run the same command again and it continues from where it stopped. `--overwrite`
+  starts over: it deletes the old images, records and exports first.
 
 ## 2. How the renderer works
 
@@ -190,8 +191,8 @@ Options:
   often), 25° or 70° to a side, or backward. It sits on the frame's edge on that side, with a couple
   of degrees of mounting error (recorded as the truth).
 - **Motion blur is physical:** a robot turning at ω rad/s during an exposure of t seconds smears the
-  image by about ω · t · f pixels (f = focal length in pixels). Tag cameras use short exposures (1-5 ms),
-  color cameras longer ones (3-10 ms).
+  image by about ω · t · f pixels (f = focal length in pixels). Monochrome cameras get short exposures
+  (1-5 ms, as teams run their tag cameras), color cameras longer ones (3-10 ms).
 - **Sign conventions:**
   - `Mount.pitch_up` is positive for a camera tilted up. WPILib's `Rotation3d` pitch is positive
     nose-down, so the WPILib mount is `Transform3d(x, y, z, Rotation3d(roll, -pitch_up, yaw))`.
@@ -216,8 +217,8 @@ with a JSON file:
 | Per camera (for the match) | preset; lens (FOV, principal point, distortion); role; mount position, height, yaw, pitch, roll |
 | Per frame | exposure time, gain (more gain = more noise), overall brightness, white balance, vignetting, defocus, motion blur from the robot's own motion, shot and read noise, JPEG quality; monochrome sensors mix red, green and blue with random, red-leaning weights (no infrared filter) |
 
-Every value drawn is stored in the image's record (`render.effects`, `render.light`, `camera`), so you
-can study or filter by it. `--effects 0 --no-randomize` gives clean, default renders.
+Every value drawn is stored in the image's record (`camera`, `render.light`, `render.effects`, and the
+per-match look in `render.appearance`), so you can study or filter by it. `--effects 0 --no-randomize` gives clean, default renders.
 
 Each purpose has its own random stream (`dataset.streams`). Changing one setting, like frames per
 match, doesn't reshuffle the rest of the match.
@@ -232,15 +233,17 @@ datasets/<name>/
   manifest.json                          config, git commit, versions, checksums: how to make it again
   dataset_card.md                        what's in it and how to read it
   config.json
-  masks/, depth/                         only with --masks / --depth (16-bit PNGs)
+  masks/, depth/                         only with --masks / --depth (16-bit PNGs; each pixel's most common
+                                         object id among its k x k samples, and that sample's depth)
   exports/<export name>/                 what export_dataset.py writes
 ```
 
 - Read the records in Python with `rebuilt_sim.vision.dataset.load_records("datasets/v1")`.
-- **Splits are by match** (80/10/10 by default, from a hash of the seed and the match). Frames from
-  one match are near-copies of each other, so splitting frames at random would put nearly the same
-  image in train and in validation, and the validation score would lie. This is called **data
-  leakage**.
+- **Splits are by match** (80/10/10 by default, from a hash of the seed and the match; set them with
+  `make_dataset.py --splits train=0.7 val=0.15 test=0.15`). They are fixed when the dataset is
+  generated. Frames from one match are near-copies of each other, so splitting frames at random
+  would put nearly the same image in train and in validation, and the validation score would lie.
+  This is called **data leakage**.
 
 **A record** holds:
 
@@ -260,10 +263,11 @@ datasets/<name>/
 | `bbox` | `[x, y, w, h]` around the **visible** pixels (None if fully hidden) |
 | `bbox_amodal` | around everything it would cover with nothing in front of it ("amodal" = including the hidden parts), clipped to the image |
 | `visibility` | visible pixels / covered pixels: 1 in full view, 0 hidden |
-| `truncation` | the fraction outside the image (cut off by the edge). Exact for FUEL; from the box around the 3D shape for the rest |
+| `truncation` | the fraction outside the image (cut off by the edge, or behind the camera). FUEL: the share of its round silhouette; the rest: the share of points spread through its 3D box |
 | `distance` | meters from the camera |
 | FUEL | `state` (ground, flight, chute), `center` in the field |
-| robot | `alliance`, `robot_index`, `team_number`, `pose`, `climbing`, `fuel_held` |
+| robot | `alliance`, `robot_index`, `team_number`, `pose`, `climbing`, `fuel_held`, `camera_robot` (it carries this camera: often its own bumper or intake at the image's edge) |
+| structures | `alliance`; `side` (low_y / high_y) for BUMPs and TRENCHes. A structure's own tags count as part of it for its visibility |
 | apriltag | `tag_id`, `corners` (pixels), `corners_visible`, `corners_field`, `min_edge_px`, `view_angle_deg` (0 = head-on), `pose_in_camera` (`rotation`, `translation`, `rvec`) |
 
 **Pixel conventions** (they bite everyone once):
@@ -273,6 +277,9 @@ datasets/<name>/
   edge = center + 0.5. That is the convention of `cv2.solvePnP` and of the `K` matrix here.
 - **The AprilTag C library** (inside WPILib, PhotonVision and pupil-apriltags) reports corners
   **+0.5 px** in both directions: its pixel centers are at +0.5. It lists them in the same order.
+  Measured on clean renders of all 32 tags: +0.51 / +0.47 px head-on. At 30° off-axis its corners
+  also drift about 0.3 px sideways. That is the detector's own bias: the rendered tags match their
+  labels to 0.01 px at any angle (a test checks this).
 - **Corner order:** counter-clockwise from the tag's printed bottom-left (bottom-left, bottom-right,
   top-right, top-left), like WPILib. **OpenCV's ArUco module** returns AprilTag corners rotated 180°:
   indices `[1, 0, 3, 2]` of these. Feeding ArUco's order straight into a pose solver flips the tag
@@ -284,7 +291,8 @@ datasets/<name>/
 ## 9. Exporting for training: your decisions
 
 `export_dataset.py` makes COCO or YOLO files from the records. **Every choice there is a training
-decision**, and none is made for you. Some you'll meet:
+decision**, and none is made for you: `--format`, `--classes`, `--box` and `--camera-robot` are
+required, and the filters default to keeping everything. Some you'll meet:
 
 | Decision | Options and trade-offs |
 |---|---|
@@ -292,15 +300,18 @@ decision**, and none is made for you. Some you'll meet:
 | Box style | `--box visible` (only what's seen; Limelight's advice) or `--box amodal` (the whole object; one team's all-synthetic FUEL model used this and did very well). They teach different things with piles of FUEL |
 | Filters | `--min-visible-px`, `--min-box-side`, `--min-visibility`, `--max-truncation`. A 2-pixel sliver of FUEL is a label a model can't possibly learn from, but cutting too much hides the hard cases it must handle |
 | FUEL states | ground, flight, chute |
+| The camera's own robot | Its bumper or intake often shows at the edge of its own images. Keep it as a "robot" or leave it out (`--camera-robot keep` or `drop`) |
 | Flips | **Mirroring corrupts AprilTags** (a mirrored tag is another, invalid code, and its corners swap). Ultralytics' default `fliplr=0.5` does this |
 | Letterboxing | PhotonVision and most YOLO pipelines squeeze frames into 640 x 640 with black bars. Small far FUEL gets 2x smaller in that step |
 | Mono vs color | Most tag cameras (and Limelight's 2026 FUEL models) are monochrome. You can train on the mix, or on one kind |
-| Size and splits | How many matches; the split fractions (`DatasetConfig.splits`) |
+| Size and splits | How many matches; the split fractions (`make_dataset.py --splits`, chosen when generating) |
 | A real test set | The only honest measure of the sim-to-real gap is a few hundred **real, hand-labeled** images, never trained on. The 171 full-resolution İstanbul broadcast frames from step 1 could be a start |
 
 YOLO exports hard-link the images (no extra disk), write `labels/<split>/*.txt` and a `data.yaml` that
-only describes paths and class names. `yolo-pose` adds the 4 tag corners as keypoints. COCO exports
-carry visibility, truncation and, for tags, the corners as keypoints.
+only describes paths and class names. `yolo-pose` adds the 4 tag corners as keypoints, normalized
+like the boxes (pixel edges). COCO exports carry visibility, truncation and, for tags, the corners as
+keypoints in pixel centers, the way detectron2 and mmpose read COCO keypoints. An export warns when a
+split has no images: small datasets (a few matches) may have no validation match at all.
 
 ## 10. Checking the data
 
@@ -327,7 +338,7 @@ Training a detector wants the RTX 3070. The project has CPU PyTorch because of d
 The training packages (a detector library, if you pick one) are your choice too; nothing is installed
 for it.
 
-## 12. What the tests prove (`tests/test_vision.py`, 21 tests)
+## 12. What the tests prove (`tests/test_vision.py`, 23 tests)
 
 - **An independent detector reads the rendered tags.** For 8 tags on every kind of mount, the AprilTag
   C library (pupil-apriltags) decodes the labeled ID and finds the corners within 0.8 px of the labels
@@ -336,9 +347,9 @@ for it.
 - **Every tag is fully visible head-on** from 1 m: nothing of the field hides any tag. The black
   squares are 0.1651 m and face the right way.
 - **Rendering matches the labels:** just inside a tag's printed edge the id buffer shows the tag, just
-  outside it doesn't, through a distorting lens. A square's rendered centroid lands within 0.02 px of
-  its projection (a half-pixel slip would be obvious). A sphere's rendered extent matches its exact
-  silhouette.
+  outside it doesn't, through a distorting lens. Seen head-on and at up to 50°, a tag covers exactly
+  its projected quadrilateral: its centroid lands within 0.02 px and its area within 0.2% (a half-pixel
+  slip would be obvious). A sphere's rendered extent matches its exact silhouette.
 - **The fast renderer equals its brute-force self** on random scenes, including shapes behind the camera.
 - **Conventions:** OpenCV projection directions, WPILib pitch sign and quaternions, OpenCV extrinsics,
   pose round trips.
@@ -352,6 +363,8 @@ for it.
   - resuming;
   - refusing to mix configs.
 - **Rendering never changes the match.**
+- **Regressions** for the bugs an independent review found: truncation of objects reaching behind the
+  camera, structures hidden by their own tags, a ball behind the lens, a clean `--overwrite`.
 
 ## 13. Limits and possible follow-ups
 

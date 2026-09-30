@@ -144,10 +144,10 @@ def robot_frame(robot: Robot) -> tuple[np.ndarray, np.ndarray]:
     this is only for drawing (and for the cameras riding on the robot)."""
     from .field_model import bump_height
 
-    s = robot.spec
+    from ..drivetrain import module_positions
+
     yaw = _rot_z(robot.heading)
-    hx, hy = s.length / 2 - C.MODULE_INSET, s.width / 2 - C.MODULE_INSET
-    wheels = np.array([(hx, hy), (hx, -hy), (-hx, hy), (-hx, -hy)])
+    wheels = module_positions(robot.spec)  # the swerve modules, inside the bumpers
     field_xy = wheels @ yaw[:2, :2].T + (robot.x, robot.y)
     z = bump_height(field_xy[:, 0], field_xy[:, 1])
     base = np.array([robot.x, robot.y, lift(robot)])

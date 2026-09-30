@@ -51,7 +51,7 @@ def stats(root) -> dict:
             "disk_mb": round(size / 1e6, 1)}
 
 
-def _git() -> dict:
+def git_info() -> dict:
     here = Path(__file__).resolve().parent
     try:
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=here, capture_output=True, text=True, timeout=10)
@@ -74,7 +74,7 @@ def write_manifest(root, cfg, st: dict, seconds: float) -> None:
         "schema": SCHEMA,
         "name": cfg.name,
         "written": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "git": _git(),
+        "git": git_info(),
         "versions": {"python": sys.version.split()[0], "numpy": np.__version__, "pillow": PIL.__version__,
                      "platform": platform.platform()},
         "config": json.loads(json.dumps(asdict(cfg))),
@@ -124,8 +124,8 @@ def dataset_card(cfg, st: dict) -> str:
         "  lighting, camera effects, and every object in view, even fully hidden ones (visibility 0). Read",
         "  them with `rebuilt_sim.vision.dataset.load_records(path)`.",
         "- `index.csv`: one row per image (time, camera, counts), for browsing and filtering.",
-        "- Training formats: make them with `scripts/export_dataset.py` (COCO, YOLO); you choose the classes,",
-        "  box style and filters there.",
+        "- Training formats: make them with `scripts/export_dataset.py` (COCO, YOLO); you choose the format,",
+        "  classes, box style and filters there.",
     ]
     if cfg.masks:
         lines.append("- `masks/<split>/*.png`: 16-bit object id + 1 per pixel (0 = backdrop); ids in `vision/ids.py`.")
@@ -144,7 +144,9 @@ def dataset_card(cfg, st: dict) -> str:
         "  The AprilTag library (WPILib, PhotonVision, pupil-apriltags) reports the same corners 0.5 px",
         "  further right and down.",
         "- `visibility` = visible pixels / pixels the object would cover with nothing in front of it.",
-        "  `truncation` = fraction of it outside the image.",
+        "  `truncation` = fraction of it outside the image (or behind the camera).",
+        "- Robot labels carry `camera_robot`: true for the robot carrying the camera (its own bumper or",
+        "  intake at the image's edge). Whether to train on those is an export choice.",
         "- Distortion: OpenCV `k1 k2 p1 p2 k3`.",
         "- AprilTags: family 36h11, black-square size 0.1651 m. Corners are listed like WPILib and the",
         "  AprilTag library: counter-clockwise from the printed bottom-left. OpenCV's ArUco AprilTag",

@@ -23,6 +23,16 @@ from rebuilt_sim.vision.dataset import DatasetConfig, dry_run, generate
 from rebuilt_sim.vision.randomize import PRESETS, RandomizationConfig
 
 
+def _splits(items: list[str]) -> tuple[tuple[str, float], ...]:
+    out = []
+    for item in items:
+        name, _, frac = item.partition("=")
+        out.append((name, float(frac)))
+    if abs(sum(f for _, f in out) - 1.0) > 1e-6:
+        raise SystemExit(f"--splits fractions must add up to 1: {items}")
+    return tuple(out)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     d = DatasetConfig()
@@ -36,12 +46,16 @@ def main() -> None:
     ap.add_argument("--scale", type=float, default=d.scale, help="fraction of each camera's native resolution")
     ap.add_argument("--supersample", type=int, default=d.supersample)
     ap.add_argument("--strategy-physics", action="store_true", help="faster matches, but FUEL flight heights are made up")
-    ap.add_argument("--no-randomize", action="store_true", help="default colors, lighting and lenses")
+    ap.add_argument("--no-randomize", action="store_true",
+                    help="default colors, lighting and lenses (camera effects are set by --effects)")
     ap.add_argument("--effects", type=float, default=d.effects_strength, help="camera effects strength (0 = clean)")
     ap.add_argument("--randomization", help="JSON file overriding RandomizationConfig ranges (vision/randomize.py)")
     ap.add_argument("--masks", action="store_true", help="also save per-pixel object ids")
     ap.add_argument("--depth", action="store_true", help="also save depth images")
-    ap.add_argument("--png", action="store_true", help="lossless PNG images (about 6x the disk space of JPEG)")
+    ap.add_argument("--png", action="store_true",
+                    help="lossless PNG images (about 4x the disk space of JPEG: 2x for mono cameras, 7x for color)")
+    ap.add_argument("--splits", nargs="+", default=[f"{n}={f:g}" for n, f in d.splits],
+                    help="split fractions by match, e.g. train=0.8 val=0.1 test=0.1 (fixed when generating)")
     ap.add_argument("--workers", type=int, default=d.workers, help="parallel processes (one match each)")
     ap.add_argument("--dry-run", action="store_true", help="only estimate time, disk and memory")
     ap.add_argument("--overwrite", action="store_true", help="regenerate matches already on disk")
@@ -56,7 +70,7 @@ def main() -> None:
         cameras_per_frame=args.cameras, seed=args.seed, presets=tuple(args.presets), scale=args.scale,
         supersample=args.supersample, hifi=not args.strategy_physics, randomize=not args.no_randomize,
         effects_strength=args.effects, masks=args.masks, depth=args.depth, lossless=args.png,
-        workers=args.workers, randomization=rc,
+        workers=args.workers, randomization=rc, splits=_splits(args.splits),
     )
     est = dry_run(cfg)
     print(f"about {est['images']} images, {est['hours']} h with {cfg.workers} worker(s), "
