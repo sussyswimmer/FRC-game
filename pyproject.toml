@@ -15,6 +15,10 @@ dependencies = [
 viz = ["pygame-ce>=2.5"]
 train = ["torch>=2.3", "stable-baselines3>=2.3", "tensorboard>=2.16"]
 dev = ["pytest>=8"]
+vision = [
+    "pillow>=10",
+    "pupil-apriltags>=1.0",
+]
 
 # CPU-only PyTorch: the CUDA build needs ~5 GB of disk, and small MLP policies train
 # just as fast on the CPU. For GPU training later, point this index at

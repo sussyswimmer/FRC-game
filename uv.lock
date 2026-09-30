@@ -42,7 +42,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
@@ -472,6 +472,28 @@ wheels = [
 ]
 
 [[package]]
+name = "pupil-apriltags"
+version = "1.0.4.post11"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b9/d2/06ec5cd9ad9835ebd7e8f28b2a4c808215fca39e180dc4f95f26b98a45e7/pupil_apriltags-1.0.4.post11.tar.gz", hash = "sha256:18980da3d3a341e94401cac341768dd453c992d9f0e19a9e6dfdd5c326ff46c4", size = 1914282, upload-time = "2025-04-22T15:21:10.88Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/0e/716a7e74e2429b5b71f555bf905706638bf62453c13910c52002305f92f8/pupil_apriltags-1.0.4.post11-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:01416a4b2517fc3c178f7e83af4eb955769c95762fb03296df78d6f5a5947199", size = 7774435, upload-time = "2025-04-22T15:20:38.541Z" },
+    { url = "https://files.pythonhosted.org/packages/e8/f8/27cff2d2a2267c78b45deda77676dcdf1b97c6708106febc82a85797a802/pupil_apriltags-1.0.4.post11-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2fbc1da75650f0535041c30a0325e97711b4388466da82f90e364e0f597664e6", size = 4931853, upload-time = "2025-04-22T15:20:54.157Z" },
+    { url = "https://files.pythonhosted.org/packages/97/cf/10cb5f46d9e09de40438878890d5887e0cd6aee3c35b514f5228ef68d5de/pupil_apriltags-1.0.4.post11-cp310-cp310-win_amd64.whl", hash = "sha256:386c7fbeaabec87c872ac52e10de3f4496fd4b4b87901480445b0c49213d9dc1", size = 2051845, upload-time = "2025-04-22T15:21:04.281Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/a4/a536c2a1493fe1941d06418bc9e6d36d1d87326ed7ca0649094f1b18f8f4/pupil_apriltags-1.0.4.post11-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:bc517b68d18af2563b1769a1dbc44bb885d8251399fb62f2a7d3e2898b916ef1", size = 7774435, upload-time = "2025-04-22T15:21:06.003Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/a2/2bdede02648f892912bf37527ee3d86f41b164410f7f9a0f170beeec8b28/pupil_apriltags-1.0.4.post11-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:51ad21586be1900aafdb95438e208b25ae6a17da919f076e757e83991f2de83b", size = 4931853, upload-time = "2025-04-22T15:20:37.201Z" },
+    { url = "https://files.pythonhosted.org/packages/24/c5/b552c6c938d20cba0f83df2b19c9c99aed3ae9802d97f8f505b14753647f/pupil_apriltags-1.0.4.post11-cp311-cp311-win_amd64.whl", hash = "sha256:6d717d1c9ca55a06e5610b109fc64cdd330e81d607b5cd6b0c87fb15f24dd80a", size = 2051845, upload-time = "2025-04-22T15:20:49.631Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/98/bb4ab70e6799b738008ddb8113f32713fec022c1988878b8381e8b373123/pupil_apriltags-1.0.4.post11-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:1b5ebe9262fe07ff16fbdcbbde78e4b04b01e32da2ec148e10d129229a1e225a", size = 7774435, upload-time = "2025-04-22T15:20:43.686Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/dd/7c0dc064274a717a8f1306428e6c6bd86d8a285b959fea880351bb0f65db/pupil_apriltags-1.0.4.post11-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:eb7a4f1228b71dbb94ba26f16ffc6378cf86b6be8ebb7a4b7d3d4a48aa121916", size = 4931854, upload-time = "2025-04-22T15:20:45.222Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/15/7dad87bbbdac51e2b7e6ed7c88bbdf4ac638631776a1b67a7ee93fad671b/pupil_apriltags-1.0.4.post11-cp312-cp312-win_amd64.whl", hash = "sha256:9c7401e008a2d0725167a08398764dd9b1a35085aad79e9ae8ea8b2e19f00c1e", size = 2051846, upload-time = "2025-04-22T15:20:46.678Z" },
+]
+
+[[package]]
 name = "pygame-ce"
 version = "2.5.8"
 source = { registry = "https://pypi.org/simple" }
@@ -590,6 +612,10 @@ train = [
     { name = "torch", version = "2.14.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.14.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
 ]
+vision = [
+    { name = "pillow" },
+    { name = "pupil-apriltags" },
+]
 viz = [
     { name = "pygame-ce" },
 ]
@@ -599,6 +625,8 @@ requires-dist = [
     { name = "gymnasium", specifier = ">=1.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pettingzoo", specifier = ">=1.24" },
+    { name = "pillow", marker = "extra == 'vision'", specifier = ">=10" },
+    { name = "pupil-apriltags", marker = "extra == 'vision'", specifier = ">=1.0" },
     { name = "pygame-ce", marker = "extra == 'viz'", specifier = ">=2.5" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -606,7 +634,7 @@ requires-dist = [
     { name = "tensorboard", marker = "extra == 'train'", specifier = ">=2.16" },
     { name = "torch", marker = "extra == 'train'", specifier = ">=2.3", index = "https://download.pytorch.org/whl/cpu" },
 ]
-provides-extras = ["viz", "train", "dev"]
+provides-extras = ["viz", "train", "dev", "vision"]
 
 [[package]]
 name = "setuptools"
@@ -717,15 +745,15 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform == 'darwin'",
 ]
 dependencies = [
-    { name = "filelock" },
-    { name = "fsspec" },
-    { name = "jinja2" },
-    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "networkx", version = "3.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "setuptools" },
-    { name = "sympy" },
-    { name = "typing-extensions" },
+    { name = "filelock", marker = "sys_platform == 'darwin'" },
+    { name = "fsspec", marker = "sys_platform == 'darwin'" },
+    { name = "jinja2", marker = "sys_platform == 'darwin'" },
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform == 'darwin'" },
+    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*' and sys_platform == 'darwin'" },
+    { name = "networkx", version = "3.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and sys_platform == 'darwin'" },
+    { name = "setuptools", marker = "sys_platform == 'darwin'" },
+    { name = "sympy", marker = "sys_platform == 'darwin'" },
+    { name = "typing-extensions", marker = "sys_platform == 'darwin'" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0-cp310-cp310-macosx_14_0_arm64.whl", hash = "sha256:99c318463564d7e05a23be78e9d0a11e5aabf34ee593fb83d891218a1313d356", upload-time = "2026-09-02T00:26:03Z" },
@@ -743,15 +771,15 @@ resolution-markers = [
     "python_full_version < '3.11' and sys_platform != 'darwin'",
 ]
 dependencies = [
-    { name = "filelock" },
-    { name = "fsspec" },
-    { name = "jinja2" },
-    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "networkx", version = "3.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "setuptools" },
-    { name = "sympy" },
-    { name = "typing-extensions" },
+    { name = "filelock", marker = "sys_platform != 'darwin'" },
+    { name = "fsspec", marker = "sys_platform != 'darwin'" },
+    { name = "jinja2", marker = "sys_platform != 'darwin'" },
+    { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' and sys_platform != 'darwin'" },
+    { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*' and sys_platform != 'darwin'" },
+    { name = "networkx", version = "3.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and sys_platform != 'darwin'" },
+    { name = "setuptools", marker = "sys_platform != 'darwin'" },
+    { name = "sympy", marker = "sys_platform != 'darwin'" },
+    { name = "typing-extensions", marker = "sys_platform != 'darwin'" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp310-cp310-linux_s390x.whl", hash = "sha256:5a3d72abbd3499175a4a6a45056fcc00898c2845235e534538cdcbdeedf642ae", upload-time = "2026-09-02T18:30:49Z" },

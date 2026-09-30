@@ -1,6 +1,6 @@
 # HANDOFF: FRC 2026 REBUILT simulator and ML training project
 
-*Written 2026-09-29 at the end of the first Claude Code chat, updated 2026-09-30 after the second (step 3). For the next Claude Code chat, and for the user.*
+*Written 2026-09-29 at the end of the first Claude Code chat, updated 2026-09-30 after the second (step 3) and the third (step 4). For the next Claude Code chat, and for the user.*
 
 ---
 
@@ -50,27 +50,29 @@ This is the most important instruction in the project.
 | **2. Core + strategy simulator:** rules engine, field, physics, calibrated bots, Gymnasium/PettingZoo environments, viewer and playable game, reference training scripts | ✅ Done | `src/rebuilt_sim/`, `scripts/`, `tests/` (34 passing), `docs/02-simulator.md`, `README.md` |
 | **Model training** (the user leads; curriculum in §4) | ⏳ Not started | No models have been trained. `runs/` is empty. |
 | **3. Driving/aiming fidelity:** a high-fidelity physics mode (swerve modules, latency, pose estimation, rectangular bumpers, 3D FUEL ballistics) | ✅ Done (chat 2) | `docs/03-driving-and-aiming.md`, `HiFiConfig` in `sim.py`, `drivetrain.py`, `collision.py`, `sensors.py`, `ballistics.py`, 3 new Gymnasium ids, `--hifi` on the scripts, 62 tests |
-| **4. Vision track** (simulator engineering plus user-led training) | ⏳ Not started | See §5 |
+| **4. Vision track:** 3D rendering of matches and labeled synthetic images | ✅ Done (chat 3) | `docs/04-vision.md`, `src/rebuilt_sim/vision/`, `scripts/make_dataset.py`, `export_dataset.py`, `check_dataset.py`, `render_view.py`, 83 tests |
+| **Vision model training** (the user leads; outline in §4b) | ⏳ Not started | No datasets generated yet; `datasets/` is gitignored |
 
 **Scope the user chose after step 1:**
 
 - Covered: **match strategy**, **driving/aiming control**, and **vision**.
 - Not chosen: "autonomous routine optimization".
 
-**Order is the user's call.** The strategy and high-fidelity environments are both ready, so the training curriculum could start immediately. The alternative is to build step 4 (vision) first.
+**Order is the user's call.** The strategy and high-fidelity environments and the vision data generator are all ready, so either training curriculum (RL in §4, vision in §4b) could start now.
 
 ---
 
 ## 2. Open questions: ask the user these at the start of the next chat
 
-1. **What next?** Start the training curriculum (§4), or build step 4 (vision) first? Step 3 is done: have them try `python scripts/play.py --hifi` and look at `docs/03-driving-and-aiming.md`.
+1. **What next?** Steps 1–4 are built. Start the RL curriculum (§4), the vision curriculum (§4b), or fix the simulator geometry first (question 6)? Have them try `python scripts/play.py --hifi` and `python scripts/render_view.py`, and look at `docs/03-driving-and-aiming.md` and `docs/04-vision.md`.
 2. **Background:** how comfortable are they with Python, NumPy, PyTorch, general ML, and reinforcement learning? Adapt depth and pace to the answer.
 3. **Learning path for the training loop:**
    - **(A)** Write PPO from scratch, single-file CleanRL style. This is the most learning; they can then compare against Stable-Baselines3.
    - **(B)** Start with Stable-Baselines3 and study how it works inside.
    - **(C)** Dissect the existing reference scripts.
 4. **Experiment tracking:** TensorBoard (already installed, local), or Weights & Biases (the industry-standard web dashboard; needs a free account)?
-5. **Field-drawing check:** can they get the official 2026 Field Dimension Drawings (§6)? Several simulator assumptions should be checked against them. The most important new one is whether the HUB's 41.7 in hexagonal opening is measured across the flats or across the corners.
+5. **Vision data choices** (only when they start vision training): which classes, visible or whole-object boxes, filters, flips (they corrupt AprilTags), dataset size, and whether to hand-label a small real test set. `docs/04-vision.md` §9 lists the trade-offs; the decisions are theirs.
+6. **Simulator vs the official field drawings.** Chat 3 got the official 2026 Field Dimension Drawings. They show the simulator's TOWER and OUTPOST 0.22 m off, the DEPOT 1.07 m off, climb positions beyond the rung ends, the HUB hexagon rotated 30°, and the TOWER as an open frame, not a box (`docs/04-vision.md` §4). The 3D render already follows the drawings; the simulator was left unchanged. Options: (A) fix the simulator in its own small step, then re-run the tests and `calibrate.py` (and `--hifi`) and update docs 02/03 (recommended); (B) keep it; (C) render the simulator's geometry.
 
 ---
 
@@ -80,7 +82,7 @@ This is the most important instruction in the project.
 git clone https://github.com/sussyswimmer/FRC-game.git
 cd FRC-game
 uv sync --all-extras                      # creates .venv (Python 3.11, CPU PyTorch, SB3, Gymnasium, PettingZoo, pygame-ce)
-.venv\Scripts\python.exe -m pytest -q     # expect: 62 passed
+.venv\Scripts\python.exe -m pytest -q     # expect: 83 passed
 .venv\Scripts\python.exe scripts\play.py  # drive a robot yourself (WASD, Q/E, SPACE intake, F shoot, C climb)
 ```
 
@@ -98,7 +100,8 @@ uv sync --all-extras                      # creates .venv (Python 3.11, CPU PyTo
 
 - The CUDA build needs about 5 GB, which the free disk space couldn't hold.
 - Small MLP policies train just as fast on the CPU, since the simulator is the bottleneck.
-- The **vision track will need the GPU.** First free about 8 GB. Then change the `pytorch-cpu` index URL in `pyproject.toml` to `https://download.pytorch.org/whl/cu126` and run `uv sync --all-extras` again.
+- The **vision track will need the GPU** for training (generating the data is CPU-only). First free about 8 GB. Then change the `pytorch-cpu` index URL in `pyproject.toml` to `https://download.pytorch.org/whl/cu126`, run `uv sync --all-extras` again, and check `torch.cuda.is_available()`. The user makes this switch (`docs/04-vision.md` §11).
+- **Vision datasets need disk too:** about 45 KB per image (10k images ≈ 0.45 GB). `make_dataset.py --out D:\datasets` can put them on another drive.
 
 **Useful commands:**
 
@@ -109,6 +112,10 @@ uv sync --all-extras                      # creates .venv (Python 3.11, CPU PyTo
 | `scripts\calibrate.py --matches 96` | Compare bot matches with the real Day 1 results |
 | `scripts\evaluate.py MODEL --tier strong --matches 100` | Compare a model with the scripted driver in the same seat on the same matches |
 | `tensorboard --logdir runs` | Training curves |
+| `scripts\render_view.py --t 30` | What a robot's camera sees at 30 s, with labels drawn on |
+| `scripts\make_dataset.py --name v1 --matches 250 --workers 12 [--dry-run]` | Generate a labeled vision dataset (estimate first) |
+| `scripts\check_dataset.py datasets\v1 --sheet sheet.png --decode-tags 100` | Check a dataset and look at it |
+| `scripts\export_dataset.py datasets\v1 --name NAME --format yolo --classes fuel` | Training files; the user picks classes and filters |
 
 ---
 
@@ -151,6 +158,19 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
   - the 3 s grace window after each shift change
   - climbing: nobody climbed high in the real Day 1 data, so the TRAVERSAL ranking point was never earned there
 
+### 4b. A vision curriculum (outline; same rules: the user decides and does, Claude mentors)
+
+Step 4 generates the data (`docs/04-vision.md`). Training a detector follows the same professional arc as §4, with different content. Adapt it to the user.
+
+| Phase | The user does | Claude does |
+|---|---|---|
+| Brief | Picks the task (FUEL detector? robots by alliance? tag corners?), the target hardware (Limelight/Hailo, Orange Pi + PhotonVision int8 YOLO, a laptop GPU), the metric (mAP50, mAP50-95, recall on small FUEL, frames per second) and a baseline to beat (e.g. a classic yellow-color-blob pipeline) | Explains detection metrics (IoU, precision/recall, mAP), and the hardware limits of each target |
+| Data | Generates a dataset, looks at contact sheets, reads the dataset card, makes the export decisions (`docs/04-vision.md` §9), and decides whether to hand-label a small **real** test set | Explains leakage, splits by match, class balance, amodal vs visible boxes, why flips break AprilTags, and the sim-to-real gap |
+| GPU | Frees disk and switches to CUDA PyTorch (§3) | Explains what CUDA is and how to verify it |
+| Model and training | Chooses a detector family and library and writes or configures the training | Explains the options (one-stage vs two-stage, anchors, input size, augmentation), reviews code and configs, reads curves with them |
+| Evaluation | Evaluates on held-out synthetic data and, if built, the real test set; studies failures by distance, visibility and camera effect using the labels' metadata | Explains error analysis and why synthetic scores overestimate real ones |
+| Iterate and ship | Changes one thing at a time (data size, randomization ranges, model), keeps the journal, exports the model for its target, writes a model card | Explains quantization (int8), export formats, and deployment on PhotonVision/Limelight |
+
 ---
 
 ## 5. Remaining simulator engineering (Claude may build it, one step at a time, with the user's go-ahead)
@@ -162,12 +182,11 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
 - Shots blocked by robots; vision latency; robots hiding AprilTags from each other.
 - `ChassisSpeeds.discretize`-style skew correction for the bots' driving.
 
-**Step 4: vision** (for training detection and localization):
+**Step 4: vision** is ✅ done (chat 3). See `docs/04-vision.md`. Follow-ups it left, if wanted (§13 there):
 
-- Render the same match state in 3D: FUEL, robots, field elements, and the 32 AprilTags.
-- Generate labeled synthetic images: bounding boxes, poses, domain randomization.
-- The user trains a detector or localizer on the RTX 3070, which needs the CUDA PyTorch switch (§3).
-- Use a lightweight renderer or Unity. Avoid Isaac Sim: 16 GB of RAM is too little.
+- **Align the simulator with the official drawings** (question 6 in §2): TOWER, OUTPOST and DEPOT positions, climb positions, the HUB hexagon's rotation, the TOWER as an open frame.
+- Tinted, reflective polycarbonate ("glass"); more shadows; FUEL logos; people and carts outside the field; the AndyMark tag layout.
+- A 2-3x faster renderer by batching small shapes, if generation time ever matters.
 
 **Smaller improvements, if wanted:**
 
@@ -181,13 +200,12 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
 
 | Assumption | Where it lives | Why it matters |
 |---|---|---|
-| **3 robots can climb side by side** across the TOWER face (offsets 0, ±0.95 m). The manual only implies at least 2. | `field.py` `CLIMB_SLOT_OFFSETS` | TRAVERSAL ranking point, END GAME strategy |
-| **DEPOT position** along the alliance wall (blue center y = 7.03 m, estimated from the broadcast) | `constants.py` `DEPOT_CENTER_Y_BLUE` | Early-match FUEL routes |
+| **Resolved by the drawings (chat 3), not yet applied to the simulator** (question 6 in §2): the DEPOT is at blue y = 5.965 m, not 7.03; the TOWER and OUTPOST centers are 0.22 m lower in y; the rungs span only ±0.60 m, so the climb offsets of ±0.95 m are off the rungs; the HUB opening is 41.7 in across the flats *inside*, but its corners (not flats) face the alliance walls | `constants.py`, `field.py`, `ballistics.py` | FUEL routes, climbing, high-fidelity scoring |
 | OUTPOST feed-zone size and human-player feed rate (4 FUEL/s) | `constants.py`, `sim.py` | OUTPOST strategy |
 | HUB processing time (0.4–0.9 s) and exit speed (1.2–3.2 m/s) | `constants.py` | Grace-window scoring, FUEL recirculation |
 | Official manual version used: TU22 (final) | `docs/01-video-analysis.md` | All point values and timings |
-| HUB opening: 41.7 in hexagon **across the flats**, flats facing the alliance walls | `constants.HUB_OPENING_ACROSS`, `ballistics.py` | High-fidelity scoring; if it is across the corners, the shooter spreads need re-tuning |
-| FUEL mass 0.227 kg, drag coefficient 0.5, no backspin lift | `constants.py` | High-fidelity shot tables and ranges |
+| FUEL mass 0.227 kg (the top of the official 0.203–0.227 kg range), drag coefficient 0.5, no backspin lift | `constants.py` | High-fidelity shot tables and ranges |
+| Vision: colors, the TRENCH arm's section, the HUB cap and funnel bottom, the net's shape (all APPROX in `vision/field_model.py`) | `docs/04-vision.md` §3 | How realistic the synthetic images look |
 
 ---
 
@@ -208,9 +226,12 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
 | `src/rebuilt_sim/viewer.py`, `runner.py`, `policies.py` | Rendering, mixed model/bot matches, model loading |
 | `src/rebuilt_sim/drivetrain.py`, `collision.py`, `sensors.py`, `apriltags.py`, `ballistics.py` | Step 3's high-fidelity physics: swerve modules, rectangular bumpers, the pose estimator and AprilTag layout, 3D FUEL flight and the aim software |
 | `docs/03-driving-and-aiming.md` | Step 3: the high-fidelity physics, its calibration and its RL interface |
+| `src/rebuilt_sim/vision/` | Step 4: `render.py` (the ray-casting renderer), `camera.py` (lenses, mounts, WPILib/OpenCV poses), `field_model.py` (the field from the drawings), `robot_model.py`, `tags.py` (36h11 patterns), `scene.py` (a match in 3D), `labels.py`, `effects.py` and `randomize.py` (domain randomization), `dataset.py`, `export.py`, `check.py`, `card.py` |
+| `docs/04-vision.md` | Step 4: how the rendering and labels work, the camera presets, the dataset format and conventions, and the user's export decisions |
 | `scripts/play.py`, `watch.py`, `calibrate.py`, `evaluate.py` | Tools |
+| `scripts/render_view.py`, `make_dataset.py`, `check_dataset.py`, `export_dataset.py` | Vision tools |
 | `scripts/train_ppo.py`, `train_selfplay.py` | **Reference only.** See the rule at the top |
-| `tests/` | 62 tests: rules, field, physics, navigation, environment APIs, and step 3's drivetrain, ballistics and sensors |
+| `tests/` | 83 tests: rules, field, physics, navigation, environment APIs, step 3's drivetrain, ballistics and sensors, and step 4's rendering, labels and datasets |
 
 ---
 
@@ -265,3 +286,24 @@ This is a **proposed** plan for Claude to mentor the user through. Adapt it to t
   - bots stuck at the DEPOT, fixed by driving the intake up to the wall.
 - **Official sources:** the WPILib AprilTag layout could be downloaded. The game manual site was blocked by the network policy; the HUB opening (41.7 in hexagon) and FUEL weight (about 0.5 lb) came from search results. Both are marked APPROX.
 
+## 10. What happened in chat 3 (step 4)
+
+- The user said "Build step 4". That is simulator engineering (rendering and vision data), which Claude may do. No models were trained and no training code was written.
+- **Research first**, from official sources: the 2026 Field Dimension Drawings and Field Manual (downloadable with curl), the AprilTag 36h11 code table (checked against the official tag images), and what cameras and mounts FRC teams actually use.
+- **What was built** (`docs/04-vision.md`):
+  - a NumPy ray-casting renderer (exact per-pixel geometry, lens distortion, supersampling, deferred lighting);
+  - the field from the drawings, with all 32 tags;
+  - randomized robots with bumper numbers, which tilt on BUMPs;
+  - FUEL on the ground, in flight and in the chutes; HUB lights that follow the shift schedule;
+  - camera presets and mounts from real teams; domain randomization;
+  - exact labels; a dataset generator (parallel, resumable, deterministic, split by match); COCO/YOLO exporters where the user makes the training choices; a checker with contact sheets; a dataset card and manifest.
+- **Checked against independent tools:** the AprilTag C library (the one WPILib and PhotonVision use) reads the rendered tags with the labeled IDs, and its corners agree with the labels to a fraction of a pixel. solvePnP on the labeled corners reproduces the labeled tag poses exactly.
+- **Found on the way:**
+  - the simulator disagrees with the official drawings in a few places (question 6 in §2); left for the user to decide;
+  - random lens distortion can describe impossible lenses, which are now rejected;
+  - the AprilTag library reports corners +0.5 px from OpenCV's convention;
+  - OpenCV's ArUco returns AprilTag corners rotated 180°.
+
+  All of these are documented.
+- **The simulator code was not touched.** The strategy physics was checked bit-for-bit against recordings from before the change.
+- A 3-agent design panel plus a judge reviewed the draft; its correctness and dataset-workflow fixes were applied. The batched-renderer speed-up and the glass effect were left as follow-ups.
