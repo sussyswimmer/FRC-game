@@ -4,9 +4,12 @@
     import rebuilt_sim.env  # registers the ids
     env = gym.make("Rebuilt-Strategy-v0")                       # 8 macro actions
     env = gym.make("Rebuilt-Control-v0")                        # continuous drive/intake/shoot/climb
+    env = gym.make("Rebuilt-Aim-HiFi-v0")                       # high fidelity, you also set the shot
 
 One episode is one full match (AUTO, pause, TELEOP, final grace) = 1660 decisions at 10 Hz.
-Rewards and opponents are configurable through ``EnvConfig`` (see docs/02-simulator.md).
+Rewards and opponents are configurable through ``EnvConfig`` (see docs/02-simulator.md);
+``EnvConfig(hifi=HiFiConfig())`` switches on the high-fidelity physics
+(docs/03-driving-and-aiming.md).
 """
 
 from __future__ import annotations
@@ -20,9 +23,11 @@ from gymnasium import spaces
 from .bots import ScriptedPolicy
 from .constants import Alliance
 from .controller import N_MACROS, Macro, MacroController
-from .obs import OBS_SIZE, observe, vel_to_frame
+from .obs import OBS_SIZE, OBS_SIZE_HIFI, observe, vel_to_frame
 from .robot import DAY1_TIER_WEIGHTS, TIERS, RobotCommand
-from .sim import Match, MatchConfig
+from .sim import HiFiConfig, Match, MatchConfig
+
+ACTION_MODES = ("macro", "continuous", "continuous_aim")
 
 
 @dataclass(frozen=True)
@@ -38,23 +43,29 @@ class RewardConfig:
 
 @dataclass(frozen=True)
 class EnvConfig:
-    action_mode: str = "macro"  # "macro" (Discrete(8)) or "continuous" (Box(6))
+    action_mode: str = "macro"  # "macro" Discrete(8), "continuous" Box(6), "continuous_aim" Box(9) (high fidelity)
     decision_dt: float = 0.1  # seconds of match time per env step
-    sim_dt: float = 0.05  # physics step
+    sim_dt: float = 0.05  # physics step (the high-fidelity physics uses hifi.dt)
     learner_tiers: tuple[str, ...] = ("strong",)  # robot the agent drives, sampled each episode
     learner_slots: tuple[int, ...] = (0, 1, 2, 3, 4, 5)  # 0-2 blue, 3-5 red, sampled each episode
     bot_tier_weights: dict = field(default_factory=lambda: dict(DAY1_TIER_WEIGHTS))
     event_level: str = "regional"
     random_starts: bool = True
     reward: RewardConfig = field(default_factory=RewardConfig)
+    hifi: HiFiConfig | None = None  # high-fidelity physics for driving and aiming (docs/03-driving-and-aiming.md)
+
+    def __post_init__(self) -> None:
+        if self.action_mode not in ACTION_MODES:
+            raise ValueError(f"unknown action_mode {self.action_mode!r}")
+        if self.action_mode == "continuous_aim" and (self.hifi is None or not self.hifi.ballistics):
+            raise ValueError("continuous_aim sets the shooter, so it needs the high-fidelity ballistics "
+                             "(hifi=HiFiConfig())")
 
 
 class MatchRunner:
     """Owns one match plus the scripted bots; applies learner actions and computes rewards."""
 
     def __init__(self, cfg: EnvConfig, learners: list[int]) -> None:
-        if cfg.action_mode not in ("macro", "continuous"):
-            raise ValueError(f"unknown action_mode {cfg.action_mode!r}")
         self.cfg = cfg
         self.learners = list(learners)
         self.match: Match | None = None
@@ -76,7 +87,8 @@ class MatchRunner:
                 drawn[i] = str(rng.choice(cfg.learner_tiers))
         match_seed, bot_seed = (int(s) for s in rng.integers(2**31, size=2))
         self.match = Match([TIERS[t] for t in drawn],
-                           MatchConfig(dt=cfg.sim_dt, event_level=cfg.event_level, random_starts=cfg.random_starts),
+                           MatchConfig(dt=cfg.sim_dt, event_level=cfg.event_level, random_starts=cfg.random_starts,
+                                       hifi=cfg.hifi),
                            seed=match_seed)
         self.ctl = MacroController(self.match)
         bots = [i for i in range(6) if i not in self.learners]
@@ -87,7 +99,7 @@ class MatchRunner:
     # ---------------------------------------------------------------- stepping
     def step(self, actions: dict[int, object]) -> None:
         m = self.match
-        n_sub = max(1, round(self.cfg.decision_dt / self.cfg.sim_dt))
+        n_sub = max(1, round(self.cfg.decision_dt / m.cfg.dt))
         for _ in range(n_sub):
             if m.done:
                 break
@@ -102,9 +114,15 @@ class MatchRunner:
             return self.ctl.command(r, Macro(int(action)))
         a = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
         vx, vy = vel_to_frame(r.alliance, a[0] * r.spec.max_speed, a[1] * r.spec.max_speed)
-        return RobotCommand(vx=float(vx), vy=float(vy), omega=float(a[2] * r.spec.max_omega),
-                            intake=bool(a[3] > 0), shoot=bool(a[4] > 0),
-                            climb=r.spec.climb_level if a[5] > 0 else 0)
+        cmd = RobotCommand(vx=float(vx), vy=float(vy), omega=float(a[2] * r.spec.max_omega),
+                           intake=bool(a[3] > 0), shoot=bool(a[4] > 0),
+                           climb=r.spec.climb_level if a[5] > 0 else 0)
+        if self.cfg.action_mode == "continuous_aim":  # -1..1 spans each setting's range
+            sh = r.spec.shooter
+            cmd.shot_speed = float(_span(sh.speed_range, a[6]))
+            cmd.hood = float(_span(sh.hood_range, a[7]))
+            cmd.turret = float(a[8] * sh.turret_range) if r.spec.turret else 0.0
+        return cmd
 
     def observe(self, i: int) -> np.ndarray:
         return observe(self.match, self.ctl, i)
@@ -148,13 +166,24 @@ class MatchRunner:
         return info
 
 
+def _span(bounds: tuple[float, float], a: float) -> float:
+    lo, hi = bounds
+    return lo + (a + 1.0) * 0.5 * (hi - lo)
+
+
 def action_space(mode: str) -> spaces.Space:
     if mode == "macro":
         return spaces.Discrete(N_MACROS)
-    return spaces.Box(low=-1.0, high=1.0, shape=(6,), dtype=np.float32)
+    # continuous: vx, vy, turn, intake, shoot, climb; continuous_aim adds exit speed, hood, turret
+    return spaces.Box(low=-1.0, high=1.0, shape=(9 if mode == "continuous_aim" else 6,), dtype=np.float32)
 
 
 OBSERVATION_SPACE = spaces.Box(low=-2.0, high=2.0, shape=(OBS_SIZE,), dtype=np.float32)
+OBSERVATION_SPACE_HIFI = spaces.Box(low=-2.0, high=2.0, shape=(OBS_SIZE_HIFI,), dtype=np.float32)
+
+
+def observation_space(cfg: EnvConfig) -> spaces.Box:
+    return OBSERVATION_SPACE if cfg.hifi is None else OBSERVATION_SPACE_HIFI
 
 
 class RebuiltEnv(gym.Env):
@@ -169,7 +198,7 @@ class RebuiltEnv(gym.Env):
         self.cfg = cfg
         self.render_mode = render_mode
         self.action_space = action_space(cfg.action_mode)
-        self.observation_space = OBSERVATION_SPACE
+        self.observation_space = observation_space(cfg)
         self.runner: MatchRunner | None = None
         self.learner = cfg.learner_slots[0]
         self._viewer = None
@@ -217,3 +246,10 @@ gym.register(id="Rebuilt-Strategy-v0", entry_point="rebuilt_sim.env:RebuiltEnv",
              kwargs={"action_mode": "macro"})
 gym.register(id="Rebuilt-Control-v0", entry_point="rebuilt_sim.env:RebuiltEnv",
              kwargs={"action_mode": "continuous"})
+# high-fidelity physics (docs/03-driving-and-aiming.md)
+gym.register(id="Rebuilt-Strategy-HiFi-v0", entry_point="rebuilt_sim.env:RebuiltEnv",
+             kwargs={"action_mode": "macro", "hifi": HiFiConfig()})
+gym.register(id="Rebuilt-Control-HiFi-v0", entry_point="rebuilt_sim.env:RebuiltEnv",
+             kwargs={"action_mode": "continuous", "hifi": HiFiConfig()})
+gym.register(id="Rebuilt-Aim-HiFi-v0", entry_point="rebuilt_sim.env:RebuiltEnv",
+             kwargs={"action_mode": "continuous_aim", "hifi": HiFiConfig()})

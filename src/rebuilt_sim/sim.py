@@ -4,19 +4,28 @@
 AUTO; the match is over (``done``) once the last scoring grace window closes at
 ``constants.FINAL_TIME``. All 504 FUEL are tracked individually so the resource
 loop (neutral zone -> hopper -> HUB -> exits -> neutral zone) is physical.
+
+``MatchConfig(hifi=HiFiConfig())`` switches on the high-fidelity physics for driving and
+aiming: swerve modules, rectangular bumpers, command latency, pose estimation and 3D FUEL
+ballistics (docs/03-driving-and-aiming.md). The rules and the referee are the same.
 """
 
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, field
 
 import numpy as np
 
+from . import collision
 from . import constants as C
+from .ballistics import Shooters
 from .constants import Alliance
+from .drivetrain import SwerveDrive
 from .field import BAND_X, FIELD
 from .robot import TIERS, ClimbState, Robot, RobotCommand, RobotSpec
+from .sensors import PoseEstimator
 from .rules import (
     AllianceScore,
     FoulLedger,
@@ -28,8 +37,8 @@ from .rules import (
     ranking_points,
 )
 
-# FUEL states
-GROUND, HELD, FLIGHT, HUB, CHUTE = range(5)
+# FUEL states (re-exported: tests and tools import them from here)
+GROUND, HELD, FLIGHT, HUB, CHUTE = C.GROUND, C.HELD, C.FLIGHT, C.HUB, C.CHUTE
 
 _CELL = 2 * C.FUEL_RADIUS
 _NX = int(math.ceil(C.FIELD_LENGTH / _CELL))
@@ -40,15 +49,34 @@ _NEIGHBOR_OFFSETS = np.array([ox * _PNY + oy for ox in (-1, 0, 1) for oy in (-1,
 _OBSTACLE_X = (C.TOWER_DEPTH, BAND_X[0], BAND_X[1], C.FIELD_LENGTH - C.TOWER_DEPTH)
 
 
+@dataclass(frozen=True)
+class HiFiConfig:
+    """High-fidelity physics for driving and aiming (docs/03-driving-and-aiming.md). Each part
+    can be switched off on its own, e.g. to measure how much it changes a trained policy."""
+
+    dt: float = 0.02  # physics step: WPILib's 50 Hz robot loop
+    swerve: bool = True  # swerve modules: steering, motor torque and current limits, traction, wheel slip
+    footprints: bool = True  # rectangular bumpers that turn when hit off-center, instead of circles
+    ballistics: bool = True  # FUEL flies in 3D into the HUB opening, instead of a hit probability
+    latency: float = 0.04  # s between a command and the motors acting on it
+    sensor_noise: float = 1.0  # scale of pose-estimate and perception noise; 0 = robots know the truth
+    fuel_every: int = 2  # FUEL rolling physics runs every Nth step (every 0.04 s) to save time
+
+
 @dataclass
 class MatchConfig:
-    dt: float = 0.05  # physics step (s)
+    dt: float = 0.05  # physics step (s); high fidelity uses hifi.dt
     event_level: str = "regional"  # sets ranking-point thresholds
     hp_feed_rate: float = 4.0  # FUEL/s a human player pushes through the OUTPOST chute
     fuel_friction: float = 2.5  # m/s^2 rolling deceleration of FUEL on carpet
     fuel_restitution: float = 0.35
     robot_restitution: float = 0.1
     random_starts: bool = False  # jitter starting spots along the ROBOT STARTING LINE
+    hifi: HiFiConfig | None = None  # high-fidelity physics (None: the fast strategy-level physics)
+
+    def __post_init__(self) -> None:
+        if self.hifi is not None:
+            self.dt = self.hifi.dt
 
 
 @dataclass
@@ -82,7 +110,9 @@ class Match:
         self.cfg = config or MatchConfig()
         # Separate random streams: field noise, the AUTO tie coin, and one per robot (shots, jams,
         # climbs), so changing one robot's behavior doesn't reshuffle every other robot's luck.
-        field_ss, coin_ss, *robot_ss = np.random.SeedSequence(seed).spawn(8)
+        # High fidelity adds a sensor stream and a perception stream.
+        streams = np.random.SeedSequence(seed).spawn(10)
+        field_ss, coin_ss, *robot_ss = streams[:8]
         self.rng = np.random.default_rng(field_ss)
         self.coin_rng = np.random.default_rng(coin_ss)
         self.robot_rngs = [np.random.default_rng(s) for s in robot_ss]
@@ -111,8 +141,38 @@ class Match:
         self._g420_contacts: set[tuple[int, int]] = set()
         self.hp_budget = [0.0, 0.0]
         self._cell_table = np.full(((_NX + 2) * _PNY, _CELL_CAP), -1, dtype=np.int64)
-        self._robot_boxes = {tall: [tuple(b) for b in self.field.obstacle_arrays[tall]] for tall in (False, True)}
+        self._robot_boxes = {k: [tuple(b) for b in arr] for k, arr in self.field.obstacle_arrays.items()}
+        # the static obstacles each robot can bump into (it passes under the ones it is short enough for)
+        self._boxes_of = [self._robot_boxes[self.field.clearance(r.spec)] for r in self.robots]
         self._init_fuel()
+
+        # high fidelity (docs/03-driving-and-aiming.md); all None / off for the strategy physics
+        hifi = self.hifi = self.cfg.hifi
+        self.drive: SwerveDrive | None = None
+        self.collider: collision.Collider | None = None
+        self.shooters: Shooters | None = None
+        self.sensors: PoseEstimator | None = None
+        self.obs_rng = np.random.default_rng(streams[9])  # perception noise in observations
+        self._fuel_every = 1
+        self._pending: list[deque] = []
+        self.lookahead = 0.0  # s a robot's code looks ahead to cover command latency
+        if hifi is not None:
+            self.lookahead = hifi.latency + 2 * self.cfg.dt
+            self._fuel_every = max(1, int(hifi.fuel_every))
+            lag = int(round(hifi.latency / self.cfg.dt))
+            self._pending = [deque([None] * lag) for _ in self.robots] if lag > 0 else []
+            if hifi.swerve:
+                self.drive = SwerveDrive(self.robots, self.cfg.dt)
+            if hifi.footprints:
+                for r in self.robots:
+                    r.rect = True
+                self.collider = collision.Collider(self)
+            if hifi.ballistics:
+                self.f_z = np.zeros(C.FUEL_TOTAL)  # height of FUEL in flight
+                self.f_vz = np.zeros(C.FUEL_TOTAL)
+                self.shooters = Shooters(self)
+            if hifi.sensor_noise > 0:
+                self.sensors = PoseEstimator(self, np.random.default_rng(streams[8]), hifi.sensor_noise)
 
     # ------------------------------------------------------------------ setup
     def _place_robots(self, starts: list[tuple[float, float]] | None) -> None:
@@ -187,6 +247,8 @@ class Match:
         idx = np.flatnonzero(self.f_state == FLIGHT)
         if idx.size == 0:
             return np.zeros((0, 3))
+        if self.shooters is not None:
+            return np.column_stack([self.f_pos[idx], self.f_z[idx] / C.HUB_OPENING_HEIGHT])
         frac = np.clip((self.t - self.f_t0[idx]) / np.maximum(self.f_time[idx] - self.f_t0[idx], 1e-6), 0, 1)
         target = np.where(
             self.f_hit[idx, None],
@@ -207,6 +269,25 @@ class Match:
             for name, s in (("ground", GROUND), ("held", HELD), ("flight", FLIGHT), ("hub", HUB), ("chute", CHUTE))
         }
 
+    def perceived(self, index: int) -> tuple[float, float, float, float, float]:
+        """(x, y, heading, vx, vy) of a robot as its own software sees them: the pose estimate
+        when sensors are simulated, the truth otherwise."""
+        if self.sensors is None:
+            r = self.robots[index]
+            return r.x, r.y, r.heading, r.vx, r.vy
+        return self.sensors.pose(index)
+
+    def can_reach(self, r: Robot, distance: float) -> bool:
+        """Whether the robot's shooter can drop FUEL into its HUB from ``distance`` m (high-fidelity
+        ballistics); the strategy physics only uses the spec's range."""
+        return self.shooters is None or self.shooters.can_reach(r, distance)
+
+    def shot_reach(self, r: Robot) -> tuple[float, float]:
+        """Closest and farthest distance from its HUB the robot's shooter can score from."""
+        if self.shooters is None or self.shooters.tables[r.index] is None:
+            return -math.inf, math.inf
+        return self.shooters.tables[r.index].reach()
+
     def summary(self) -> MatchSummary:
         a, b = self.scores
         winner = None if a.total == b.total else (Alliance.BLUE if a.total > b.total else Alliance.RED)
@@ -225,25 +306,44 @@ class Match:
         period = period_at(t0)
         enabled = period not in (Period.PAUSE, Period.POST, Period.DONE)
         cmds = [c if (c is not None and enabled) else None for c in commands]
+        if self._pending:  # latency: the motors act on the command from a few steps ago
+            cmds = self._delay(cmds, enabled)
         for r, c in zip(self.robots, cmds):
             r.last_cmd = c or RobotCommand()
 
-        self._drive(cmds, dt)
-        self._collide_static()
-        self._collide_robots()
-        self._collide_static()
+        if self.drive is not None:
+            self._drive_swerve(cmds)
+        else:
+            self._drive(cmds, dt)
+        if self.collider is not None:
+            self.contacts = self.collider.resolve()
+        else:
+            self._collide_static()
+            self._collide_robots()
+            self._collide_static()
+        fuel_step = (self.step_count + 1) % self._fuel_every == 0
         self._climb(cmds, period, dt)
         self._jams(cmds, dt)
         self._intake(cmds, dt)
-        self._push_fuel()
+        if fuel_step:
+            self._push_fuel()
         self._outposts(cmds, dt)
-        self._shoot(cmds, dt)
+        if self.shooters is not None:
+            self.shooters.shoot(cmds, dt)
+        else:
+            self._shoot(cmds, dt)
 
         self.step_count += 1
         t1 = round(self.step_count * dt, 9)
-        self._resolve_flights(t1)
+        if self.shooters is not None:
+            self.shooters.fly(t0, dt)
+        else:
+            self._resolve_flights(t1)
         self._resolve_hubs(t1)
-        self._fuel_physics(dt)
+        if fuel_step:
+            self._fuel_physics(dt * self._fuel_every)
+        if self.sensors is not None:
+            self.sensors.update(dt)
         self._referee(period, dt)
         self.t = t1
         self._transitions(t0, t1)
@@ -256,6 +356,40 @@ class Match:
         return self.summary()
 
     # ------------------------------------------------------------------ robots
+    def _delay(self, cmds: list[RobotCommand | None], enabled: bool) -> list[RobotCommand | None]:
+        out = []
+        for q, c in zip(self._pending, cmds):
+            q.append(c)
+            late = q.popleft()
+            out.append(late if enabled else None)
+        return out
+
+    def _drive_swerve(self, cmds: list[RobotCommand | None]) -> None:
+        """High fidelity: each robot's code asks for chassis speeds (capped like ``_drive``), then
+        the swerve modules and the carpet decide what actually happens."""
+        target = np.zeros((len(self.robots), 3))
+        active = np.zeros(len(self.robots), dtype=bool)
+        for i, (r, c) in enumerate(zip(self.robots, cmds)):
+            s = r.spec
+            if r.climb_state != ClimbState.GROUND or s.max_speed <= 0:
+                r.vx = r.vy = r.omega = 0.0
+                self.drive.stop(i)
+                continue
+            active[i] = True
+            if c is None:  # disabled: the drive holds zero speed
+                continue
+            tvx, tvy = c.vx, c.vy
+            cap = min(s.max_speed, s.bump_speed) if self.field.on_bump(r.x, r.y) else s.max_speed
+            sp = math.hypot(tvx, tvy)
+            if sp > cap:
+                tvx, tvy = tvx * cap / sp, tvy * cap / sp
+            target[i] = (tvx, tvy, max(-s.max_omega, min(s.max_omega, c.omega)))
+        if self.sensors is not None:
+            heading = self.sensors.est[:, 2]
+        else:
+            heading = np.array([r.heading for r in self.robots])
+        self.drive.step(self.robots, target, heading, active)
+
     def _drive(self, cmds: list[RobotCommand | None], dt: float) -> None:
         for r, c in zip(self.robots, cmds):
             s = r.spec
@@ -296,7 +430,7 @@ class Match:
                 r.y, r.vy = C.FIELD_WIDTH - rad, min(r.vy, 0.0)
             if not _near_obstacles(r.x, rad):
                 continue
-            for x0, x1, y0, y1 in self._robot_boxes[not r.spec.can_trench]:
+            for x0, x1, y0, y1 in self._boxes_of[r.index]:
                 if r.x + rad <= x0 or r.x - rad >= x1 or r.y + rad <= y0 or r.y - rad >= y1:
                     continue
                 qx, qy = min(max(r.x, x0), x1), min(max(r.y, y0), y1)
@@ -361,7 +495,7 @@ class Match:
             s = r.spec
             if r.climb_state == ClimbState.GROUND:
                 if (c.climb > 0 and s.climb_level > 0 and r.speed < 0.6
-                        and self.field.in_climb_zone(r.alliance, r.x, r.y, s.radius)):
+                        and self.field.in_climb_zone(r.alliance, r.x, r.y, r.extent_x)):
                     level = 1 if period == Period.AUTO else min(c.climb, s.climb_level)
                     r.climb_state = ClimbState.CLIMBING
                     r.climb_target = level
@@ -407,7 +541,8 @@ class Match:
             n = min(int(r.intake_budget), s.capacity - r.fuel)
             if n <= 0:
                 continue
-            reach = s.radius + s.intake_reach + C.FUEL_RADIUS
+            front = r.front
+            reach = front + s.intake_reach + C.FUEL_RADIUS
             rx, ry = P[:, 0] - r.x, P[:, 1] - r.y
             near = (np.abs(rx) < reach) & (np.abs(ry) < reach)
             if not near.any():
@@ -416,7 +551,7 @@ class Match:
             ch, sh = math.cos(r.heading), math.sin(r.heading)
             fwd = rx[k] * ch + ry[k] * sh
             lat = -rx[k] * sh + ry[k] * ch
-            ok = (fwd >= s.radius - 0.25) & (fwd <= reach) & (np.abs(lat) <= s.intake_width / 2)
+            ok = (fwd >= front - 0.25) & (fwd <= reach) & (np.abs(lat) <= s.intake_width / 2)
             k, fwd = k[ok], fwd[ok]
             if k.size == 0:
                 continue
@@ -433,6 +568,9 @@ class Match:
     def _push_fuel(self) -> None:
         g = np.flatnonzero(self.f_state == GROUND)
         if g.size == 0:
+            return
+        if self.collider is not None:
+            collision.push_fuel(self, g)
             return
         P = self.f_pos[g]
         changed = False
@@ -468,7 +606,7 @@ class Match:
                 for r, c in zip(self.robots, cmds):
                     if (r.alliance == a and c is not None and c.intake and r.climb_state == ClimbState.GROUND
                             and r.fuel < r.spec.capacity
-                            and self.field.in_outpost_feed(a, r.x, r.y, r.spec.radius)):
+                            and self.field.in_outpost_feed(a, r.x, r.y, r.extent_x)):
                         target = r
                         break
             if target is None:
@@ -504,15 +642,16 @@ class Match:
                 self._launch(r, dist, dx, dy)
                 r.shoot_cooldown += 1.0 / s.shoot_rate
                 launched += 1
-            if launched and r.g407_cooldown <= 0 and not self.field.in_alliance_zone(r.alliance, r.x, s.radius):
+            if launched and r.g407_cooldown <= 0 and not self.field.in_alliance_zone(r.alliance, r.x, r.extent_x):
                 self._foul(r, "G407 shot from outside own ALLIANCE ZONE", major=True)
                 r.g407_cooldown = 1.0
 
     @staticmethod
-    def can_aim(r: Robot, dx: float, dy: float) -> bool:
+    def can_aim(r: Robot, dx: float, dy: float, heading: float | None = None) -> bool:
         if r.spec.turret:
             return True
-        err = (math.atan2(dy, dx) - r.heading + math.pi) % (2 * math.pi) - math.pi
+        heading = r.heading if heading is None else heading
+        err = (math.atan2(dy, dx) - heading + math.pi) % (2 * math.pi) - math.pi
         return abs(err) <= math.radians(15)
 
     def _launch(self, r: Robot, dist: float, dx: float, dy: float) -> None:
@@ -560,17 +699,20 @@ class Match:
             a = Alliance(int(self.f_owner[i]))
             ts = float(self.f_time[i])
             shooter = self.robots[int(self.f_shooter[i])]
+            own = shooter.alliance == a  # high-fidelity FUEL can drop into the other HUB
             if self.schedule.counts(a, ts):
                 auto = fuel_counts_for_auto(ts)
                 if auto:
                     self.scores[a].auto_fuel += 1
                 else:
                     self.scores[a].teleop_fuel += 1
-                shooter.stats.fuel_scored += 1
+                if own:
+                    shooter.stats.fuel_scored += 1
                 self.score_log.append(ScoreEvent(ts, a, shooter.index, auto))
             else:
                 self.scores[a].wasted_fuel += 1
-                shooter.stats.fuel_wasted += 1
+                if own:
+                    shooter.stats.fuel_wasted += 1
             exits, sign = self.field.hub_exits[a]
             e = exits[self.rng.integers(len(exits))]
             self.f_state[i] = GROUND
@@ -685,13 +827,13 @@ class Match:
         t = self.t
         if period == Period.AUTO:  # G403: stay on your side of the CENTER LINE in AUTO
             for r in rs:
-                if not r.crossed_center_foul and self.field.fully_across_center(r.alliance, r.x, r.spec.radius):
+                if not r.crossed_center_foul and self.field.fully_across_center(r.alliance, r.x, r.extent_x):
                     r.crossed_center_foul = True
                     self._foul(r, "G403 crossed the CENTER LINE in AUTO", major=True)
             for i, j in self.contacts:
                 for off, other in ((rs[i], rs[j]), (rs[j], rs[i])):
                     if (off.alliance != other.alliance and (off.index, other.index) not in self._g403_contacts
-                            and self.field.fully_across_center(off.alliance, off.x, off.spec.radius)):
+                            and self.field.fully_across_center(off.alliance, off.x, off.extent_x)):
                         self._g403_contacts.add((off.index, other.index))
                         self._foul(off, "G403 contact across the CENTER LINE in AUTO", major=True)
 
@@ -734,7 +876,7 @@ class Match:
                     if off.alliance == vic.alliance or (off.index, vic.index) in self._g420_contacts:
                         continue
                     on_tower = vic.climb_state in (ClimbState.CLIMBING, ClimbState.CLIMBED)
-                    if on_tower or self.field.in_climb_zone(vic.alliance, vic.x, vic.y, vic.spec.radius):
+                    if on_tower or self.field.in_climb_zone(vic.alliance, vic.x, vic.y, vic.extent_x):
                         self._g420_contacts.add((off.index, vic.index))
                         self._foul(off, "G420 contact with a robot at its TOWER in END GAME", major=True)
                         if on_tower:

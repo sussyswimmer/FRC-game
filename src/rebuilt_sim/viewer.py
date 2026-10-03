@@ -2,6 +2,9 @@
 
 Blue alliance wall on the left, red on the right, field +y pointing up the screen.
 ``Viewer(headless=True)`` renders off-screen (for ``render_mode="rgb_array"``).
+With the high-fidelity physics it also draws the bumper rectangles, the swerve modules'
+wheel directions, the HUB openings, and a thin outline where the highlighted robot
+believes it is (its pose estimate).
 """
 
 from __future__ import annotations
@@ -12,7 +15,9 @@ import os
 import numpy as np
 
 from . import constants as C
+from .ballistics import APOTHEM
 from .constants import Alliance
+from .drivetrain import module_positions
 from .field import FIELD
 from .robot import ClimbState
 from .rules import Period, display_clock, period_bounds
@@ -94,12 +99,13 @@ class Viewer:
                 pg.draw.rect(surf, (200, 180, 40), r, 1)
             for pair in FIELD.trench_columns:
                 pg.draw.rect(surf, (30, 30, 34), self.rect(pair[a]))
-            tower = self.rect(FIELD.towers[a])
-            pg.draw.rect(surf, (35, 35, 40), tower)
-            for k in range(3):
-                y = tower.top + (k + 1) * tower.height // 4
-                pg.draw.line(surf, col, (tower.left + 3, y), (tower.right - 3, y), 3)
-            pg.draw.rect(surf, col, tower, 2)
+            # the TOWER: its floor plate, the RUNGS' line and the two UPRIGHTS
+            pg.draw.rect(surf, (45, 45, 50), self.rect(FIELD.towers[a]))
+            front = FIELD.tower_fronts[a]
+            cx = front.center[0]
+            pg.draw.line(surf, col, self.px(cx, front.y0), self.px(cx, front.y1), 4)
+            for pair in FIELD.tower_uprights:
+                pg.draw.rect(surf, col, self.rect(pair[a]))
             pg.draw.rect(surf, col, self.rect(FIELD.depots[a]), 2)
             oy = C.OUTPOST_CENTER_Y_BLUE if a == Alliance.BLUE else C.FIELD_WIDTH - C.OUTPOST_CENTER_Y_BLUE
             ox = 0.0 if a == Alliance.BLUE else C.FIELD_LENGTH
@@ -131,7 +137,11 @@ class Viewer:
             lbl = self.small.render(str(match.chute_count[a]), True, FUEL_COLOR)
             s.blit(lbl, lbl.get_rect(center=self.px(ox, oy)))
         for r in match.robots:
-            self._draw_robot(r, r.index == highlight)
+            self._draw_robot(r, r.index == highlight, match)
+        if highlight is not None and match.sensors is not None:  # where the robot believes it is
+            x, y, h, _, _ = match.perceived(highlight)
+            r = match.robots[highlight]
+            pg.draw.polygon(s, (255, 255, 255), self._footprint(r, x, y, h), 1)
         self._draw_hud(match)
         if message:
             lbl = self.font.render(message, True, TEXT)
@@ -157,23 +167,40 @@ class Viewer:
             pg.draw.rect(s, (30, 30, 34), r)
             pg.draw.rect(s, color, r.inflate(-10, -10), 0 if active else 3)
             pg.draw.rect(s, color, r, 3)
+            if m.shooters is not None:  # the hexagonal opening FUEL has to drop through
+                cx, cy = FIELD.hub_centers[a]
+                corner = APOTHEM / math.cos(math.pi / 6)
+                pts = [self.px(cx + corner * math.cos(math.pi / 6 + k * math.pi / 3),
+                               cy + corner * math.sin(math.pi / 6 + k * math.pi / 3)) for k in range(6)]
+                pg.draw.polygon(s, (30, 30, 34), pts, 2)
 
-    def _draw_robot(self, r, highlight: bool):
+    def _footprint(self, r, x: float, y: float, heading: float) -> list[tuple[int, int]]:
+        """Screen corners of a robot's bumpers at pose (x, y, heading): front-left, front-right, ..."""
+        if r.rect:
+            hl, hw = r.spec.length / 2, r.spec.width / 2
+        else:
+            hl = hw = r.spec.radius * 0.93
+        ch, sh = math.cos(heading), math.sin(heading)
+        return [self.px(x + dx * hl * ch - dy * hw * sh, y + dx * hl * sh + dy * hw * ch)
+                for dx, dy in ((1, 1), (1, -1), (-1, -1), (-1, 1))]
+
+    def _draw_robot(self, r, highlight: bool, match=None):
         pg = self.pg
         s = self.screen
         col = BLUE if r.alliance == Alliance.BLUE else RED
         half = r.spec.radius * SCALE * 0.93
-        ch, sh = math.cos(r.heading), math.sin(r.heading)
-        corners = []
-        for dx, dy in ((1, 1), (1, -1), (-1, -1), (-1, 1)):
-            x = r.x + (dx * ch - dy * sh) * half / SCALE
-            y = r.y + (dx * sh + dy * ch) * half / SCALE
-            corners.append(self.px(x, y))
+        corners = self._footprint(r, r.x, r.y, r.heading)
         body = (70, 72, 78) if r.mobile or r.climb_state != ClimbState.GROUND else (40, 40, 44)
         pg.draw.polygon(s, body, corners)
         pg.draw.polygon(s, col, corners, 5)
         # intake edge
         pg.draw.line(s, FUEL_COLOR, corners[0], corners[1], 3)
+        if match is not None and match.drive is not None:  # swerve modules: which way each wheel points
+            ch, sh = math.cos(r.heading), math.sin(r.heading)
+            for (mx, my), a in zip(module_positions(r.spec), match.drive.angle[r.index]):
+                wx, wy = r.x + mx * ch - my * sh, r.y + mx * sh + my * ch
+                dx, dy = 0.07 * math.cos(r.heading + a), 0.07 * math.sin(r.heading + a)
+                pg.draw.line(s, (20, 20, 22), self.px(wx - dx, wy - dy), self.px(wx + dx, wy + dy), 4)
         if highlight:
             pg.draw.circle(s, (255, 255, 255), self.px(r.x, r.y), int(half * 1.45), 2)
         label = self.small.render(f"{r.name[0].upper()}{r.slot + 1}:{r.fuel}", True, TEXT)

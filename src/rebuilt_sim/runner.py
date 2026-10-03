@@ -13,19 +13,24 @@ from pathlib import Path
 import numpy as np
 
 from .env import EnvConfig, MatchRunner
+from .sim import HiFiConfig
 
 AGENTS = ("blue_0", "blue_1", "blue_2", "red_0", "red_1", "red_2")
 
 
 def run_config_for(model_path: str | Path, mode: str) -> EnvConfig:
-    """EnvConfig matching how a model was trained (reads config.json from its run folder)."""
+    """EnvConfig matching how a model was trained (reads config.json from its run folder):
+    action mode, decision interval and, if it was trained on it, the high-fidelity physics."""
     path = Path(model_path).resolve()
     for folder in (path.parent, path.parent.parent):
         cfg_file = folder / "config.json"
         if cfg_file.exists():
             env = json.loads(cfg_file.read_text()).get("env", {})
-            return EnvConfig(action_mode=mode, decision_dt=float(env.get("decision_dt", 0.1)))
-    return EnvConfig(action_mode=mode, decision_dt=0.25 if mode == "macro" else 0.1)
+            hifi = env.get("hifi")
+            return EnvConfig(action_mode=mode, decision_dt=float(env.get("decision_dt", 0.1)),
+                             hifi=HiFiConfig(**hifi) if hifi else None)
+    return EnvConfig(action_mode=mode, decision_dt=0.25 if mode == "macro" else 0.1,
+                     hifi=HiFiConfig() if mode == "continuous_aim" else None)
 
 
 class PolicyMatch:

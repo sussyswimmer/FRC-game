@@ -3,6 +3,10 @@
 Every robot sees the field as if it were on the blue alliance (red observations are
 rotated 180 degrees about the field center), so one policy can play either color.
 All values are roughly within [-1, 1]. ``OBS_LAYOUT`` documents the slices.
+
+With the high-fidelity physics the robot's own pose and velocity come from its pose
+estimate, other robots and FUEL are seen with perception noise, and 8 more values describe
+its shooter (docs/03-driving-and-aiming.md).
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from .controller import MacroController, fuel_density
 from .field import FIELD
 from .robot import ClimbState, Robot
 from .rules import Period
+from .sensors import FUEL_SD, OTHER_SD, OTHER_VEL_SD
 
 _PERIODS = (Period.AUTO, Period.PAUSE, Period.TRANSITION, Period.SHIFT1, Period.SHIFT2, Period.SHIFT3,
             Period.SHIFT4, Period.ENDGAME)
@@ -30,8 +35,11 @@ OBS_LAYOUT = {
     "fuel_grid": (76, 148),  # 12 x 6 FUEL counts / 15
     "nearest_fuel": (148, 158),  # 5 nearest ground FUEL, relative position / 4 m
     "stock": (158, 162),  # own/opp DEPOT FUEL, own/opp OUTPOST chute FUEL (/24)
+    "shooter": (162, 170),  # high fidelity only: flywheel, hood, turret (cos, sin), speed and hood ranges
 }
 OBS_SIZE = 162
+OBS_SIZE_HIFI = 170
+_HALF_PI = math.pi / 2
 
 
 def to_frame(alliance: Alliance, x, y):
@@ -52,7 +60,10 @@ def heading_to_frame(alliance: Alliance, heading: float) -> float:
 def observe(match, ctl: MacroController, index: int) -> np.ndarray:
     r: Robot = match.robots[index]
     a = r.alliance
-    o = np.zeros(OBS_SIZE, dtype=np.float32)
+    hifi = match.hifi is not None
+    noise = match.hifi.sensor_noise if hifi else 0.0
+    rng = match.obs_rng
+    o = np.zeros(OBS_SIZE_HIFI if hifi else OBS_SIZE, dtype=np.float32)
     t = match.t
     period = match.period
 
@@ -72,11 +83,12 @@ def observe(match, ctl: MacroController, index: int) -> np.ndarray:
     o[15] = own.fuel / 360.0 if own.fuel < 360 else 1.0 + _squash(own.fuel - 360, 360.0)
     o[16] = opp.fuel / 360.0 if opp.fuel < 360 else 1.0 + _squash(opp.fuel - 360, 360.0)
 
-    # --- self ---
+    # --- self, as the robot's own sensors see it ---
     s = r.spec
-    x, y = to_frame(a, r.x, r.y)
-    h = heading_to_frame(a, r.heading)
-    vx, vy = vel_to_frame(a, r.vx, r.vy)
+    px, py, ph, pvx, pvy = match.perceived(index)
+    x, y = to_frame(a, px, py)
+    h = heading_to_frame(a, ph)
+    vx, vy = vel_to_frame(a, pvx, pvy)
     hx, hy = FIELD.hub_centers[a]
     o[17] = x / C.FIELD_LENGTH
     o[18] = y / C.FIELD_WIDTH
@@ -86,12 +98,12 @@ def observe(match, ctl: MacroController, index: int) -> np.ndarray:
     o[22] = vy / 5.0
     o[23] = r.fuel / 50.0
     o[24] = r.fuel / max(1, s.capacity)
-    o[25] = float(FIELD.in_alliance_zone(a, r.x, s.radius))
-    o[26] = float(ctl.can_shoot_here(r) and match.can_aim(r, hx - r.x, hy - r.y))
+    o[25] = float(FIELD.in_alliance_zone(a, px, r.extent_x))
+    o[26] = float(ctl.can_shoot_here(r, px, py) and match.can_aim(r, hx - px, hy - py, ph))
     o[27] = {ClimbState.GROUND: 0.0, ClimbState.CLIMBING: 0.5, ClimbState.CLIMBED: 1.0,
              ClimbState.DESCENDING: 0.5}[r.climb_state]
     o[28] = float(r.jam_timer > 0)
-    o[29] = math.hypot(hx - r.x, hy - r.y) / 8.0
+    o[29] = math.hypot(hx - px, hy - py) / 8.0
     o[30] = s.capacity / 50.0
     o[31] = float(s.can_trench)
     o[32] = float(s.turret)
@@ -105,6 +117,10 @@ def observe(match, ctl: MacroController, index: int) -> np.ndarray:
     for q in others:
         qx, qy = to_frame(a, q.x, q.y)
         qvx, qvy = vel_to_frame(a, q.vx, q.vy)
+        if noise > 0:
+            ex, ey, evx, evy = rng.normal(0.0, 1.0, 4)
+            qx, qy = qx + ex * OTHER_SD * noise, qy + ey * OTHER_SD * noise
+            qvx, qvy = qvx + evx * OTHER_VEL_SD * noise, qvy + evy * OTHER_VEL_SD * noise
         o[k:k + 8] = (
             (qx - x) / C.FIELD_LENGTH, (qy - y) / C.FIELD_WIDTH, qvx / 5.0, qvy / 5.0, q.fuel / 50.0,
             float(q.climb_state != ClimbState.GROUND), float(q.mobile), math.hypot(qx - x, qy - y) / 10.0,
@@ -118,6 +134,9 @@ def observe(match, ctl: MacroController, index: int) -> np.ndarray:
         pts = np.column_stack([gx, gy])
         grid = fuel_density(pts, GRID)
         o[76:148] = np.minimum(grid.ravel() / 15.0, 1.0)
+        if noise > 0:  # where object detection puts each ball
+            gx = gx + rng.normal(0.0, FUEL_SD * noise, gx.size)
+            gy = gy + rng.normal(0.0, FUEL_SD * noise, gy.size)
         d = np.hypot(gx - x, gy - y)
         n = min(N_NEAREST, d.size)
         near = np.argpartition(d, n - 1)[:n] if d.size > n else np.arange(d.size)
@@ -130,6 +149,18 @@ def observe(match, ctl: MacroController, index: int) -> np.ndarray:
     o[159] = match.depot_count(a.other) / 24.0
     o[160] = match.chute_count[a] / 24.0
     o[161] = match.chute_count[a.other] / 24.0
+
+    # --- shooter (high fidelity): state of the mechanism and what it can do ---
+    if hifi:
+        sh = s.shooter
+        o[162] = r.flywheel / 15.0
+        o[163] = r.hood / _HALF_PI
+        o[164] = math.cos(r.turret)
+        o[165] = math.sin(r.turret)
+        o[166] = sh.speed_range[0] / 15.0
+        o[167] = sh.speed_range[1] / 15.0
+        o[168] = sh.hood_range[0] / _HALF_PI
+        o[169] = sh.hood_range[1] / _HALF_PI
     return np.clip(o, -2.0, 2.0, out=o)  # the declared observation space is [-2, 2]
 
 
