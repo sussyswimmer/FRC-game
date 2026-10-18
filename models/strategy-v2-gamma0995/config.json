@@ -1,0 +1,22 @@
+{
+  "env": {
+    "id": "Rebuilt-Strategy-v0",
+    "decision_dt": 0.25,
+    "learner_tiers": [
+      "strong"
+    ]
+  },
+  "ppo": {
+    "learning_rate": 0.0003,
+    "n_steps": 2048,
+    "batch_size": 64,
+    "n_epochs": 10,
+    "gamma": 0.995,
+    "gae_lambda": 0.95,
+    "ent_coef": 0.0
+  },
+  "total_steps": 3000000,
+  "n_envs": 16,
+  "seed": 0,
+  "git_commit": "950c39d306d2b076b7a5e25e9873e3b899c11471"
+}
