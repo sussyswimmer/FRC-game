@@ -1,0 +1,4 @@
+scripted   win    0.78 ± 0.03  margin   32.23 ± 8.01  own  114.76 ± 4.81  RP    2.75 ± 0.10  robot FUEL   59.17 ± 0.51  wasted    2.67 ± 0.49  fouls    0.04 ± 0.01  tower    0.00 ± 0.00
+model      win    0.81 ± 0.03  margin   38.80 ± 8.32  own  120.73 ± 5.09  RP    2.96 ± 0.10  robot FUEL   63.85 ± 0.78  wasted    1.54 ± 0.15  fouls    0.00 ± 0.00  tower    0.00 ± 0.00
+
+model vs scripted driver, same 200 matches: margin change +6.6 (±1.3), win rate 80% vs 78%
