@@ -13,11 +13,12 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import SubprocVecEnv
 
 # --- settings: every choice for this run, in one place ------------------------------
-RUN_NAME = "strategy-v1-test"
-TOTAL_STEPS = 100_000  # a short test run; a real run is about 3_000_000
+RUN_NAME = "strategy-v2-gamma0995"
+TOTAL_STEPS = 3_000_000  # a short test run is 100_000
 N_ENVS = 16  # matches played at the same time, one per CPU core
 DECISION_DT = 0.25  # seconds of game time between the agent's decisions
 SEED = 0
+GAMMA = 0.995  # how far ahead the agent looks: about 1 / (1 - GAMMA) decisions (strategy-v1 used 0.99)
 
 
 def make_envs():
@@ -34,7 +35,7 @@ def main():
     run_dir = Path("runs") / RUN_NAME
     run_dir.mkdir(parents=True, exist_ok=True)
     env = make_envs()
-    model = PPO("MlpPolicy", env, seed=SEED, verbose=1, tensorboard_log="runs/tensorboard")
+    model = PPO("MlpPolicy", env, gamma=GAMMA, seed=SEED, verbose=1, tensorboard_log="runs/tensorboard")
 
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     config = {
