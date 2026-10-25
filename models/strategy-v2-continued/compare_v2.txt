@@ -1,0 +1,4 @@
+models/strategy-v2-gamma0995/final_model.zip: margin +38.8  win 80%  RP 2.96  robot FUEL 63.9  wasted 1.54
+models/strategy-v2-continued/final_model.zip: margin +44.0  win 80%  RP 3.01  robot FUEL 68.8  wasted 1.16
+
+second minus first, same 200 matches: margin change +5.2 (±1.4 standard error)
